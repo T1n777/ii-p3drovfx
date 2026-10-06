@@ -333,7 +333,7 @@ Item {
         anchors.top: parent.top
         // Reaches the bottom when the host gives this a height, so the list
         // inside can take the room instead of stopping at a fixed cap.
-        anchors.bottom: root.height > contentColumnLayout.implicitHeight ? parent.bottom : undefined
+        anchors.bottom: root.height > contentColumnLayout.implicitHeight ? undefined : parent.bottom
         spacing: 6
 
         RowLayout {

@@ -1318,6 +1318,7 @@ Item {
     Component {
         id: promptComponent
         PersonaLibrary {
+            anchors.fill: parent
             onClosed: root.closePopover()
         }
     }
@@ -1332,6 +1333,7 @@ Item {
     Component {
         id: keysComponent
         AiApiKeyManager {
+            anchors.fill: parent
             onClosed: root.closePopover()
         }
     }
