@@ -206,8 +206,7 @@ Item {
 
                 readonly property int gap: 12
                 readonly property int fits: Math.max(1, Math.floor((width + gap) / (300 + gap)))
-                // Four tiles: one row of four, two of two or a column, never 3 + 1.
-                readonly property int columns: fits >= 4 ? 4 : fits >= 2 ? 2 : 1
+                readonly property int columns: fits >= 5 ? 5 : fits >= 3 ? 3 : fits >= 2 ? 2 : 1
                 readonly property int tileWidth: Math.floor((width - gap * (columns - 1)) / columns)
                 readonly property int tileHeight: 200
 
@@ -217,7 +216,6 @@ Item {
                     spacing: tiles.gap
 
                     ColorsFeatureTile {
-                        visible: FaceId.available || !Fingerprint.deviceAvailable
                         width: tiles.tileWidth
                         height: tiles.tileHeight
                         symbol: "face"
@@ -226,7 +224,11 @@ Item {
                         summary: {
                             if (!checked)
                                 return Translation.tr("Unlock with your password only");
-                            if (!FaceId.cameraAvailable)
+                            if (FaceId.probed && !FaceId.gazeInstalled)
+                                return Translation.tr("Gaze not installed · Tap to set up");
+                            if (FaceId.probed && !FaceId.daemonRunning)
+                                return Translation.tr("Gaze daemon not running");
+                            if (FaceId.probed && !FaceId.cameraAvailable)
                                 return Translation.tr("No camera found");
                             if (!FaceId.hasEnrolled)
                                 return Translation.tr("No face enrolled yet");
@@ -242,7 +244,6 @@ Item {
                     }
 
                     ColorsFeatureTile {
-                        visible: Fingerprint.deviceAvailable
                         width: tiles.tileWidth
                         height: tiles.tileHeight
                         symbol: "fingerprint"
