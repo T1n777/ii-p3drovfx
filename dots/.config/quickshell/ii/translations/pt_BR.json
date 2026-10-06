@@ -13991,5 +13991,17 @@
     "Synonyms · %1": "Sinônimos · %1",
     "The translation service took too long to answer": "O serviço de tradução demorou demais para responder",
     "Type in the search field — Enter copies the translation, Ctrl+S reads it aloud": "Digite no campo de busca — Enter copia a tradução, Ctrl+S lê em voz alta",
-    "translate-shell is missing": "translate-shell não está instalado"
+    "translate-shell is missing": "translate-shell não está instalado",
+    "Face ID": "Face ID",
+    "Face ID ready (Gaze)": "Face ID pronto (Gaze)",
+    "Face recognized": "Rosto reconhecido",
+    "Face not recognized": "Rosto não reconhecido",
+    "Scanning face…": "Escaneando rosto…",
+    "Press Enter for Face ID": "Pressione Enter para Face ID",
+    "Unlock with Face ID": "Desbloquear com Face ID",
+    "Show Face ID indicator on lock screen": "Mostrar indicador de Face ID na tela de bloqueio",
+    "1 face profile enrolled": "1 perfil facial cadastrado",
+    "%1 face profiles enrolled": "%1 perfis faciais cadastrados",
+    "No face enrolled yet": "Nenhum rosto cadastrado ainda",
+    "Face verification timed out": "Tempo limite de verificação facial esgotado"
 }

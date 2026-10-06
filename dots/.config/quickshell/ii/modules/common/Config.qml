@@ -5764,6 +5764,10 @@ Singleton {
                         // [{ finger: "right-index-finger", label: "Trigger finger" }]
                         property list<var> labels: []
                     }
+                    property JsonObject faceId: JsonObject {
+                        property bool enable: true
+                        property bool showIndicator: true
+                    }
                 }
                 /**
                  * A keyboard drawn inside the lock surface itself.

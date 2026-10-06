@@ -13984,5 +13984,17 @@
     "Synonyms · %1": "Synonyms · %1",
     "The translation service took too long to answer": "The translation service took too long to answer",
     "Type in the search field — Enter copies the translation, Ctrl+S reads it aloud": "Type in the search field — Enter copies the translation, Ctrl+S reads it aloud",
-    "translate-shell is missing": "translate-shell is missing"
+    "translate-shell is missing": "translate-shell is missing",
+    "Face ID": "Face ID",
+    "Face ID ready (Gaze)": "Face ID ready (Gaze)",
+    "Face recognized": "Face recognized",
+    "Face not recognized": "Face not recognized",
+    "Scanning face…": "Scanning face…",
+    "Press Enter for Face ID": "Press Enter for Face ID",
+    "Unlock with Face ID": "Unlock with Face ID",
+    "Show Face ID indicator on lock screen": "Show Face ID indicator on lock screen",
+    "1 face profile enrolled": "1 face profile enrolled",
+    "%1 face profiles enrolled": "%1 face profiles enrolled",
+    "No face enrolled yet": "No face enrolled yet",
+    "Face verification timed out": "Face verification timed out"
 }
