@@ -4,6 +4,7 @@ import Quickshell.Wayland
 import qs
 import qs.services
 import qs.modules.common
+import qs.modules.ii.background.shortcuts
 
 /**
  * The desktop right-click menu's surface: one per screen, built on that
@@ -32,7 +33,7 @@ Scope {
             // The open flag stays true through the exit: the card plays its
             // way out and only then calls finishDesktopMenuClose. Beyond that,
             // the surface is KEPT ALIVE once this screen has used the menu:
-            // building a PanelWindow plus a seven-row card and mapping a fresh
+            // building a PanelWindow plus the menu card and mapping a fresh
             // layershell surface was the dead time between the right-click and
             // the first frame of the animation. Hidden (unmapped), it costs a
             // small QML tree and no surface, no frame and no grabs; the next
@@ -147,8 +148,11 @@ Scope {
                     id: menuCard
                     origin: GlobalStates.desktopMenuOrigin
                     closing: GlobalStates.desktopMenuClosing
-                    x: Math.min(Math.max(GlobalStates.desktopMenuX, 8), menuWindow.width - width - 8)
-                    y: Math.min(Math.max(GlobalStates.desktopMenuY, 8), menuWindow.height - height - 8)
+                    surfaceWidth: menuWindow.width
+                    surfaceHeight: menuWindow.height
+                    readonly property var insets: DesktopShortcuts.panelInsets(menuLoader.screenName)
+                    x: Math.min(Math.max(GlobalStates.desktopMenuX, insets.left), menuWindow.width - visualWidth - insets.right)
+                    y: Math.min(Math.max(GlobalStates.desktopMenuY, insets.top), menuWindow.height - visualHeight - insets.bottom)
                     onDismissRequested: GlobalStates.closeDesktopMenu()
                     onExitFinished: GlobalStates.finishDesktopMenuClose()
                 }

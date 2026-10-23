@@ -7,6 +7,7 @@ import io
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -458,14 +459,15 @@ class TestPersonalDataStripping(unittest.TestCase):
         self.assertTrue(sanitized["soundcore"]["enableEqualizer"])
         self.assertTrue(sanitized["phone"]["contacts"]["showAvatars"])
 
-    def test_desktop_widget_photos_do_not_travel(self):
+    def test_desktop_widget_photos_travel(self):
         data = {"background": {"widgets": {
-            "photo_pill_2x1": {"imagePath": "/home/testuser/Downloads/me.png", "radius": 12},
+            "photo_pill_2x1": {"imagePath": f"{self.home_dir}/Downloads/me.png", "radius": 12},
             "showOnlyOnSingleMonitor": True,
         }}}
         sanitized = presets_helper.sanitize_data(copy.deepcopy(data), self.home_dir)
         widget = sanitized["background"]["widgets"]["photo_pill_2x1"]
-        self.assertNotIn("imagePath", widget)
+        self.assertEqual(widget["imagePath"], "$HOME/Downloads/me.png")
+        self.assertEqual(widget.get("asset"), "photo0")
         self.assertEqual(widget["radius"], 12)
 
     def test_weather_location_does_not_travel(self):
@@ -510,6 +512,148 @@ class TestPersonalDataStripping(unittest.TestCase):
         self.assertEqual(sanitized["phone"]["scrcpy"]["bitRate"], "8M")
         self.assertEqual(sanitized["phone"]["webcam"]["resolution"], "1280x720")
         self.assertTrue(sanitized["interactions"]["touchGestures"]["enable"])
+
+    def test_photo_instance_pictures_travel(self):
+        """Each photo widget instance carries its own picture and travels with the preset."""
+        data = {"background": {"activeWidgets": [
+            {"id": "a", "widgetId": "photo", "x": 0, "y": 0, "imagePath": f"{self.home_dir}/Pictures/a.png"},
+            {"id": "b", "widgetId": "photo", "x": 10, "y": 0},
+        ]}}
+        sanitized = presets_helper.sanitize_data(copy.deepcopy(data), self.home_dir)
+        widgets = sanitized["background"]["activeWidgets"]
+        self.assertEqual(widgets[0]["imagePath"], "$HOME/Pictures/a.png")
+        self.assertEqual(widgets[0].get("asset"), "photo0")
+        self.assertEqual(widgets[0]["widgetId"], "photo")
+        self.assertEqual(widgets[1]["x"], 10)
+
+    def test_depth_effect_stays_on_its_machine(self):
+        """The depth effect runs on models downloaded to one machine, and its
+        per-picture choices are keyed by the author's file paths: a preset
+        neither carries it nor overrides the importer's own."""
+        author = {"background": {"wallpaperPath": "/tmp/wall.png", "depthEffect": {
+            "enable": True, "model": "anime", "outline": True, "notify": True,
+            "wallpapers": [{"path": f"{self.home_dir}/Pictures/wall.png", "model": "general"}]}}}
+        sanitized = presets_helper.sanitize_data(copy.deepcopy(author), self.home_dir)
+        self.assertNotIn("depthEffect", sanitized["background"])
+        self.assertIn("wallpaperPath", sanitized["background"])
+
+        # A preset saved before the blacklist still carries it; applying one
+        # keeps the importer's setting, whatever the preset says.
+        importer = {"background": {"depthEffect": {"enable": False, "model": "",
+            "outline": False, "notify": True, "wallpapers": []}}}
+        merged = copy.deepcopy(author)
+        presets_helper.restore_local_only(merged, importer)
+        self.assertEqual(merged["background"]["depthEffect"], importer["background"]["depthEffect"])
+
+    def test_localsend_and_phone_toggles_do_not_travel(self):
+        """LocalSend and Phone config toggles must not travel in presets,
+        and must not be overwritten when applying presets."""
+        data = {
+            "localsend": {
+                "autoStart": False,
+                "showNotifications": False,
+                "preferPopupOverNotification": False,
+                "downloadPath": "/opt/custom/downloads",
+            },
+            "phone": {
+                "kdeconnectEnabled": False,
+                "remoteCommands": False,
+                "mirrorNotificationsToDesktop": False,
+                "showPeripheralCards": False,
+                "contacts": {"enabled": False, "showAvatars": True},
+                "scrcpy": {
+                    "useWireless": True,
+                    "autoWirelessIp": False,
+                    "pinAdbPort": True,
+                    "autoResume": False,
+                    "embed": {"enabled": False},
+                    "recording": {"folder": "/custom/recordings"},
+                    "bitRate": "16M",
+                },
+            },
+            "background": {
+                "widgets": {
+                    "send_drop": {
+                        "localsendIp": "192.168.1.100",
+                        "localsendAlias": "MyPhone",
+                        "kdeDevice": "device123",
+                    }
+                }
+            }
+        }
+        sanitized = presets_helper.sanitize_data(copy.deepcopy(data), self.home_dir)
+
+        # LocalSend toggles stripped on save
+        self.assertNotIn("autoStart", sanitized["localsend"])
+        self.assertNotIn("showNotifications", sanitized["localsend"])
+        self.assertNotIn("preferPopupOverNotification", sanitized["localsend"])
+        self.assertEqual(sanitized["localsend"]["downloadPath"], "$HOME/Downloads")
+
+        # Phone toggles stripped on save
+        self.assertNotIn("kdeconnectEnabled", sanitized["phone"])
+        self.assertNotIn("remoteCommands", sanitized["phone"])
+        self.assertNotIn("mirrorNotificationsToDesktop", sanitized["phone"])
+        self.assertNotIn("showPeripheralCards", sanitized["phone"])
+        self.assertNotIn("enabled", sanitized["phone"]["contacts"])
+        self.assertNotIn("useWireless", sanitized["phone"]["scrcpy"])
+        self.assertNotIn("autoWirelessIp", sanitized["phone"]["scrcpy"])
+        self.assertNotIn("pinAdbPort", sanitized["phone"]["scrcpy"])
+        self.assertNotIn("autoResume", sanitized["phone"]["scrcpy"])
+        self.assertNotIn("enabled", sanitized["phone"]["scrcpy"]["embed"])
+        self.assertNotIn("folder", sanitized["phone"]["scrcpy"]["recording"])
+
+        # Send drop widget hardware/device IDs stripped
+        send_drop = sanitized["background"]["widgets"]["send_drop"]
+        self.assertNotIn("localsendIp", send_drop)
+        self.assertNotIn("localsendAlias", send_drop)
+        self.assertNotIn("kdeDevice", send_drop)
+
+        # Style options still travel
+        self.assertTrue(sanitized["phone"]["contacts"]["showAvatars"])
+        self.assertEqual(sanitized["phone"]["scrcpy"]["bitRate"], "16M")
+
+        # Verify restore_local_only preserves local user's toggles
+        importer = {
+            "localsend": {
+                "autoStart": True,
+                "showNotifications": True,
+                "preferPopupOverNotification": True,
+                "downloadPath": "/home/importer/Downloads",
+            },
+            "phone": {
+                "kdeconnectEnabled": True,
+                "remoteCommands": True,
+                "mirrorNotificationsToDesktop": True,
+                "showPeripheralCards": True,
+                "contacts": {"enabled": True},
+                "scrcpy": {
+                    "useWireless": False,
+                    "autoWirelessIp": True,
+                    "pinAdbPort": False,
+                    "autoResume": True,
+                    "embed": {"enabled": True},
+                    "recording": {"folder": "/home/importer/Videos"},
+                }
+            }
+        }
+        merged = copy.deepcopy(data)
+        presets_helper.restore_local_only(merged, importer)
+        self.assertTrue(merged["localsend"]["autoStart"])
+        self.assertTrue(merged["localsend"]["showNotifications"])
+        self.assertTrue(merged["localsend"]["preferPopupOverNotification"])
+        self.assertEqual(merged["localsend"]["downloadPath"], "/home/importer/Downloads")
+        self.assertTrue(merged["phone"]["kdeconnectEnabled"])
+        self.assertTrue(merged["phone"]["remoteCommands"])
+        self.assertTrue(merged["phone"]["mirrorNotificationsToDesktop"])
+        self.assertTrue(merged["phone"]["showPeripheralCards"])
+        self.assertTrue(merged["phone"]["contacts"]["enabled"])
+        self.assertFalse(merged["phone"]["scrcpy"]["useWireless"])
+        self.assertTrue(merged["phone"]["scrcpy"]["autoWirelessIp"])
+        self.assertFalse(merged["phone"]["scrcpy"]["pinAdbPort"])
+        self.assertTrue(merged["phone"]["scrcpy"]["autoResume"])
+        self.assertTrue(merged["phone"]["scrcpy"]["embed"]["enabled"])
+        self.assertEqual(merged["phone"]["scrcpy"]["recording"]["folder"], "/home/importer/Videos")
+
 
 
 # Types that can carry an address, an account or a hardware id. A bool named
@@ -978,26 +1122,19 @@ class TestPresetScan(unittest.TestCase):
         self.assertEqual(self.paths(result, "shell"), ["apps.terminal"])
         self.assertEqual(self.group(result, "shell")["severity"], "high")
 
-    def test_mode_shell_action_is_reported_with_its_mode_name(self):
+    def test_mode_shell_action_in_a_preset_is_not_reported(self):
+        """Modes never travel, so this action never reaches the importer's machine and nothing is shown."""
         preset = {"modes": {"modes": [{"id": "focus", "name": "Focus", "actions": [
             {"type": "dnd", "value": True},
             {"type": "shell", "value": {"start": "rm -rf ~/Documents", "end": "echo bye"}},
         ]}]}}
-        result = self.scan(preset, {})
-        self.assertEqual(self.paths(result, "shell"),
-                         ["modes.modes.0.actions.1.value.start",
-                          "modes.modes.0.actions.1.value.end"])
-        labels = [i["label"] for i in self.group(result, "shell")["items"]]
-        self.assertEqual(labels, ["Focus (on start)", "Focus (on end)"])
+        self.assertEqual(self.scan(preset, {})["total"], 0)
 
-    def test_routine_shell_action_with_a_bare_string_value(self):
+    def test_routine_shell_action_in_a_preset_is_not_reported(self):
         preset = {"modes": {"routines": [
             {"id": "r1", "name": "Morning", "actions": [
                 {"type": "shell", "value": "systemctl --user stop firewall"}]}]}}
-        result = self.scan(preset, {})
-        # Once, as a shell command -- not a second time as an unclassified one.
-        self.assertEqual(self.paths(result),
-                         ["modes.routines.0.actions.0.value.start"])
+        self.assertEqual(self.scan(preset, {})["total"], 0)
 
     def test_shell_command_already_in_the_config_is_not_reported(self):
         """Matched on the command, so reordering modes is not a page of warnings."""
@@ -1510,6 +1647,471 @@ class TestBlacklistAndWidgetNormalization(unittest.TestCase):
             self.assertEqual(merged["search"]["baseWidth"], 700)
             self.assertEqual(merged["search"]["baseHeight"], 560)
 
+
+def merge_preset_into_config(preset, local_config):
+    """Apply `preset` onto `local_config` with presets_helper.merge() and return the result."""
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        preset_file = os.path.join(tmp_dir, "preset.json")
+        config_file = os.path.join(tmp_dir, "config.json")
+        with open(preset_file, "w", encoding="utf-8") as f:
+            json.dump(preset, f)
+        with open(config_file, "w", encoding="utf-8") as f:
+            json.dump(local_config, f)
+        presets_helper.merge(preset_file, config_file, config_file)
+        with open(config_file, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+
+class TestScreenTimeStaysLocal(unittest.TestCase):
+    """Daily limits and the usage tracker never leave a machine in a preset, nor overwrite the importer's."""
+
+    LIMIT = {
+        "id": "abc123", "kind": "app", "name": "", "keys": ["org.vinegarhq.Sober"],
+        "minutes": 60, "days": [True] * 7, "enabled": True, "strict": False,
+    }
+
+    def test_screen_time_and_app_stats_blacklisted_on_export(self):
+        input_data = {
+            "appearance": {"palette": "vynx"},
+            "screenTime": {"enable": True, "limits": [self.LIMIT]},
+            "appStats": {"enable": False, "idleTimeoutSec": 0},
+        }
+        sanitized = presets_helper.sanitize_data(copy.deepcopy(input_data), "/home/testuser")
+        self.assertNotIn("screenTime", sanitized)
+        self.assertNotIn("appStats", sanitized)
+        self.assertEqual(sanitized["appearance"]["palette"], "vynx")
+
+    def test_preset_limits_and_tracker_are_not_imported(self):
+        preset = {
+            "appearance": {"palette": "nord"},
+            "screenTime": {"enable": True, "limits": [self.LIMIT]},
+            "appStats": {"enable": False},
+        }
+        local_config = {
+            "appearance": {"palette": "vynx"},
+            "screenTime": {"enable": True, "limits": []},
+            "appStats": {"enable": True, "idleTimeoutSec": 300},
+        }
+        merged = merge_preset_into_config(preset, local_config)
+        self.assertEqual(merged["appearance"]["palette"], "nord")
+        self.assertEqual(merged["screenTime"]["limits"], [])
+        self.assertTrue(merged["appStats"]["enable"])
+        self.assertEqual(merged["appStats"]["idleTimeoutSec"], 300)
+
+    def test_preset_cannot_add_limits_to_a_config_without_them(self):
+        preset = {"screenTime": {"enable": True, "limits": [self.LIMIT]}}
+        merged = merge_preset_into_config(preset, {"appearance": {"palette": "vynx"}})
+        self.assertNotIn("screenTime", merged)
+
+    def test_restore_local_only_hands_back_screen_time(self):
+        # The risk scan merges without the sanitizer, so this path has to hold on its own.
+        current = {"screenTime": {"enable": True, "limits": []}, "appStats": {"enable": True}}
+        merged = {"screenTime": {"enable": True, "limits": [self.LIMIT]}, "appStats": {"enable": False}}
+        presets_helper.restore_local_only(merged, current)
+        self.assertEqual(merged["screenTime"], current["screenTime"])
+        self.assertEqual(merged["appStats"], current["appStats"])
+
+
+class TestModesStayLocal(unittest.TestCase):
+    """Modes & Routines never leave a machine in a preset, nor overwrite the importer's."""
+
+    MODE = {"id": "focus", "name": "Focus", "actions": [{"type": "dnd", "value": True}]}
+
+    def test_modes_blacklisted_on_export(self):
+        input_data = {
+            "appearance": {"palette": "vynx"},
+            "modes": {"enable": True, "modes": [self.MODE], "routines": []},
+        }
+        sanitized = presets_helper.sanitize_data(copy.deepcopy(input_data), "/home/testuser")
+        self.assertNotIn("modes", sanitized)
+        self.assertEqual(sanitized["appearance"]["palette"], "vynx")
+
+    def test_preset_modes_are_not_imported(self):
+        preset = {
+            "appearance": {"palette": "nord"},
+            "modes": {"enable": False, "modes": [self.MODE], "routines": [self.MODE]},
+        }
+        local_config = {
+            "appearance": {"palette": "vynx"},
+            "modes": {"enable": True, "modes": [], "routines": []},
+        }
+        merged = merge_preset_into_config(preset, local_config)
+        self.assertEqual(merged["appearance"]["palette"], "nord")
+        self.assertTrue(merged["modes"]["enable"])
+        self.assertEqual(merged["modes"]["modes"], [])
+        self.assertEqual(merged["modes"]["routines"], [])
+
+    def test_preset_cannot_add_modes_to_a_config_without_them(self):
+        preset = {"modes": {"enable": True, "modes": [self.MODE]}}
+        merged = merge_preset_into_config(preset, {"appearance": {"palette": "vynx"}})
+        self.assertNotIn("modes", merged)
+
+    def test_restore_local_only_hands_back_modes(self):
+        # The risk scan merges without the sanitizer, so this path has to hold on its own.
+        current = {"modes": {"enable": True, "modes": []}}
+        merged = {"modes": {"enable": False, "modes": [self.MODE]}}
+        presets_helper.restore_local_only(merged, current)
+        self.assertEqual(merged["modes"], current["modes"])
+
+
+class TestClockAndIntrusiveModeStayLocal(unittest.TestCase):
+    """The Clock app, bedtime (and intrusive mode), alarms, timers, pomodoro, reminders and world clocks never travel in a preset."""
+
+    CLOCK_APP = {
+        "enable": True,
+        "startTab": "bedtime",
+        "showTimetableEvents": False,
+        "timetableLeadMinutes": 30,
+        "timetableLookaheadDays": 5,
+        "analogWorldClock": False,
+        "showSecondsInApp": False,
+        "bedtime": {
+            "enable": True,
+            "time": "22:00",
+            "days": [True, True, True, True, True, False, False],
+            "windDownMinutes": 45,
+            "remindEveryMinutes": 10,
+            "nightEndsHour": 6,
+            "intrusive": True,
+            "snoozeMinutes": 5,
+            "maxSnoozes": 3,
+            "shutdownGraceSeconds": 30,
+        },
+        "phoneAlarm": {
+            "enable": False,
+            "pollMinutes": 15,
+            "clockApps": ["com.google.android.deskclock"],
+            "ignorePackages": [],
+        },
+        "reminders": {
+            "defaultAlert": "strong",
+            "allDayTime": "08:00",
+            "snoozeMinutes": 10,
+            "autoSilenceMinutes": 2,
+            "catchUpMinutes": 20,
+            "wakeFromSuspend": True,
+            "alertBackgroundColor": "#ff0000",
+            "alertBackgroundImage": "/home/author/bg.png",
+            "alertSound": True,
+            "autoDeleteCompletedDays": 7,
+            "trashDays": 14,
+            "sortBy": "name",
+            "pinImportant": False,
+            "showCompleted": True,
+            "view": "list",
+            "categoriesExpanded": False,
+            "showTemplates": False,
+            "defaultCategory": "work",
+            "showInTimetable": False,
+            "todoSync": {"enable": True, "intervalMinutes": 5},
+        },
+    }
+
+    TIME = {
+        "format": "h:mm ap",
+        "secondsFormat": "ss",
+        "shortDateFormat": "MM/dd",
+        "longDateFormat": "yyyy-MM-dd",
+        "dateWithYearFormat": "yyyy-MM-dd",
+        "dateFormat": "ddd, MMM d",
+        "firstDayOfWeek": 0,
+        "secondPrecision": True,
+        "worldClocks": [{"city": "Tokyo", "tz": "Asia/Tokyo"}],
+        "pomodoro": {
+            "focus": 3000,
+            "breakTime": 600,
+            "longBreak": 1800,
+            "cyclesBeforeLongBreak": 2,
+            "notify": False,
+        },
+        "timer": {
+            "notify": False,
+            "presets": [120, 600],
+        },
+        "alarms": {
+            "useFullscreenPopup": True,
+            "showAnalogClock": False,
+            "showWorldClocks": False,
+            "showAlarmsSection": False,
+            "snoozeMinutes": 5,
+            "autoSilenceMinutes": 0,
+            "catchUpMinutes": 30,
+            "wakeFromSuspend": False,
+            "wakeLeadSeconds": 120,
+            "upcomingMinutes": 120,
+            "showUpcoming": False,
+        },
+    }
+
+    def test_clock_and_intrusive_mode_blacklisted_on_export(self):
+        input_data = {
+            "appearance": {"palette": "vynx"},
+            "clockApp": copy.deepcopy(self.CLOCK_APP),
+            "time": copy.deepcopy(self.TIME),
+        }
+        sanitized = presets_helper.sanitize_data(copy.deepcopy(input_data), "/home/testuser")
+        self.assertNotIn("clockApp", sanitized)
+        self.assertNotIn("time", sanitized)
+        self.assertEqual(sanitized["appearance"]["palette"], "vynx")
+
+    def test_preset_clock_and_intrusive_mode_are_not_imported_or_merged(self):
+        preset = {
+            "appearance": {"palette": "nord"},
+            "clockApp": copy.deepcopy(self.CLOCK_APP),
+            "time": copy.deepcopy(self.TIME),
+        }
+        local_config = {
+            "appearance": {"palette": "vynx"},
+            "clockApp": {
+                "enable": True,
+                "bedtime": {
+                    "enable": False,
+                    "time": "23:30",
+                    "intrusive": False,
+                    "maxSnoozes": 3,
+                    "shutdownGraceSeconds": 30,
+                },
+            },
+            "time": {
+                "format": "hh:mm",
+                "firstDayOfWeek": 6,
+                "worldClocks": [],
+                "alarms": {"useFullscreenPopup": False, "wakeFromSuspend": True},
+            },
+        }
+        merged = merge_preset_into_config(preset, local_config)
+        self.assertEqual(merged["appearance"]["palette"], "nord")
+        self.assertFalse(merged["clockApp"]["bedtime"]["enable"])
+        self.assertFalse(merged["clockApp"]["bedtime"]["intrusive"])
+        self.assertEqual(merged["clockApp"]["bedtime"]["time"], "23:30")
+        self.assertNotIn("reminders", merged["clockApp"])
+        self.assertEqual(merged["time"]["format"], "hh:mm")
+        self.assertEqual(merged["time"]["firstDayOfWeek"], 6)
+        self.assertEqual(merged["time"]["worldClocks"], [])
+        self.assertFalse(merged["time"]["alarms"]["useFullscreenPopup"])
+        self.assertTrue(merged["time"]["alarms"]["wakeFromSuspend"])
+
+    def test_preset_cannot_add_clock_or_intrusive_mode_to_a_config_without_them(self):
+        preset = {
+            "clockApp": copy.deepcopy(self.CLOCK_APP),
+            "time": copy.deepcopy(self.TIME),
+        }
+        merged = merge_preset_into_config(preset, {"appearance": {"palette": "vynx"}})
+        self.assertNotIn("clockApp", merged)
+        self.assertNotIn("time", merged)
+
+    def test_restore_local_only_hands_back_clock_and_time(self):
+        current = {
+            "clockApp": {"bedtime": {"enable": False, "intrusive": False}},
+            "time": {"format": "hh:mm"},
+        }
+        merged = {
+            "clockApp": copy.deepcopy(self.CLOCK_APP),
+            "time": copy.deepcopy(self.TIME),
+        }
+        presets_helper.restore_local_only(merged, current)
+        self.assertEqual(merged["clockApp"], current["clockApp"])
+        self.assertEqual(merged["time"], current["time"])
+
+
+class TestDesktopPhotoWidgetsPresetExport(unittest.TestCase):
+    """Contracts and integration tests for desktop photo widgets in presets."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.home = self.tmp.name
+        self.old_home = os.environ.get("HOME")
+        os.environ["HOME"] = self.home
+        def restore_home():
+            if self.old_home is not None:
+                os.environ["HOME"] = self.old_home
+            else:
+                os.environ.pop("HOME", None)
+        self.addCleanup(restore_home)
+
+        self.pics_dir = os.path.join(self.home, "Pictures")
+        self.presets_dir = os.path.join(self.home, "presets")
+        os.makedirs(self.pics_dir, exist_ok=True)
+        os.makedirs(self.presets_dir, exist_ok=True)
+
+        self.img1 = os.path.join(self.pics_dir, "cat.png")
+        self.img2 = os.path.join(self.pics_dir, "dog.jpg")
+        with open(self.img1, "wb") as f:
+            f.write(b"PNG_CAT_DATA")
+        with open(self.img2, "wb") as f:
+            f.write(b"JPG_DOG_DATA")
+
+    def test_portable_photo_widgets_assignment(self):
+        data = {
+            "background": {
+                "activeWidgets": [
+                    {"id": "w1", "widgetId": "photo", "imagePath": self.img1},
+                    {"id": "w2", "widgetId": "photo_1x1", "imagePath": self.img2},
+                    {"id": "w3", "widgetId": "photo", "imagePath": self.img1},  # Duplicate image
+                    {"id": "w4", "widgetId": "clock"},
+                ],
+                "widgets": {
+                    "photo_pill_2x1": {"imagePath": self.img2},
+                    "clock": {"showSeconds": True},
+                }
+            }
+        }
+        presets_helper.portable_photo_widgets(data)
+        active = data["background"]["activeWidgets"]
+        self.assertEqual(active[0]["asset"], "photo0")
+        self.assertEqual(active[1]["asset"], "photo1")
+        # Duplicate image reuses photo0
+        self.assertEqual(active[2]["asset"], "photo0")
+        self.assertNotIn("asset", active[3])
+
+        widgets = data["background"]["widgets"]
+        # photo_pill_2x1 reuses photo1 because it points to img2
+        self.assertEqual(widgets["photo_pill_2x1"]["asset"], "photo1")
+        self.assertNotIn("asset", widgets["clock"])
+
+    def test_bundle_photos_copies_images_to_presets_dir(self):
+        preset_name = "MyPreset"
+        preset_file = os.path.join(self.presets_dir, f"{preset_name}.json")
+        data = {
+            "background": {
+                "activeWidgets": [
+                    {"id": "w1", "widgetId": "photo", "imagePath": self.img1, "asset": "photo0"},
+                ],
+                "widgets": {
+                    "photo_pill_2x1": {"imagePath": self.img2, "asset": "photo1"},
+                }
+            }
+        }
+        with open(preset_file, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+
+        presets_helper.bundle_photos(preset_file, self.presets_dir, preset_name)
+
+        bundled = presets_helper.photo_asset_files(self.presets_dir, preset_name)
+        self.assertIn("photo0", bundled)
+        self.assertIn("photo1", bundled)
+        self.assertTrue(os.path.isfile(bundled["photo0"]))
+        self.assertTrue(os.path.isfile(bundled["photo1"]))
+        with open(bundled["photo0"], "rb") as f:
+            self.assertEqual(f.read(), b"PNG_CAT_DATA")
+        with open(bundled["photo1"], "rb") as f:
+            self.assertEqual(f.read(), b"JPG_DOG_DATA")
+
+    def test_export_photos_stages_files_into_destination(self):
+        preset_name = "MyPreset"
+        export_dir = os.path.join(self.home, "export_tmp")
+        os.makedirs(export_dir, exist_ok=True)
+        config_file = os.path.join(export_dir, "config.json")
+
+        data = {
+            "background": {
+                "activeWidgets": [
+                    {"id": "w1", "widgetId": "photo", "imagePath": self.img1, "asset": "photo0"},
+                    {"id": "w2", "widgetId": "photo_plain_2x1", "imagePath": self.img2, "asset": "photo1"},
+                ]
+            }
+        }
+        with open(config_file, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+
+        presets_helper.export_photos(config_file, export_dir, self.presets_dir, preset_name)
+
+        p0 = os.path.join(export_dir, "photo0.png")
+        p1 = os.path.join(export_dir, "photo1.jpg")
+        self.assertTrue(os.path.isfile(p0))
+        self.assertTrue(os.path.isfile(p1))
+        with open(p0, "rb") as f:
+            self.assertEqual(f.read(), b"PNG_CAT_DATA")
+        with open(p1, "rb") as f:
+            self.assertEqual(f.read(), b"JPG_DOG_DATA")
+
+    def test_resolve_photo_assets_on_merge(self):
+        preset_name = "AlienTheme"
+        # Bundle a photo under presets_dir
+        bundled_photo = os.path.join(self.presets_dir, f"{preset_name}_photo0.png")
+        with open(bundled_photo, "wb") as f:
+            f.write(b"ALIEN_PHOTO")
+
+        preset = {
+            "background": {
+                "activeWidgets": [
+                    {"id": "inst_x", "widgetId": "photo", "imagePath": "/author/disk/old.png", "asset": "photo0"},
+                ]
+            }
+        }
+        current = {
+            "background": {
+                "activeWidgets": []
+            }
+        }
+        merged = copy.deepcopy(preset)
+        presets_helper.resolve_photo_assets(merged, preset, current, self.presets_dir, preset_name)
+
+        resolved_path = merged["background"]["activeWidgets"][0]["imagePath"]
+        self.assertEqual(resolved_path, bundled_photo)
+        self.assertTrue(os.path.isfile(resolved_path))
+
+    def test_full_roundtrip_save_export_import_merge(self):
+        # 1. Author config has a photo widget
+        author_config = {
+            "background": {
+                "activeWidgets": [
+                    {"id": "pw1", "widgetId": "photo_plain_2x1", "imagePath": self.img1, "x": 100, "y": 200}
+                ]
+            }
+        }
+
+        # 2. Save snapshot & bundle
+        preset_name = "TestPreset"
+        preset_file = os.path.join(self.presets_dir, f"{preset_name}.json")
+        author_config = presets_helper.sanitize_data(author_config, self.home, snapshot=True)
+        with open(preset_file, "w", encoding="utf-8") as f:
+            json.dump(author_config, f)
+        presets_helper.bundle_photos(preset_file, self.presets_dir, preset_name)
+
+        # Verify bundled next to preset
+        bundled_files = presets_helper.photo_asset_files(self.presets_dir, preset_name)
+        self.assertIn("photo0", bundled_files)
+
+        # 3. Export to temp staging directory (simulating export to zip)
+        export_tmp = os.path.join(self.home, "export_tmp")
+        os.makedirs(export_tmp, exist_ok=True)
+        exported_config = os.path.join(export_tmp, "config.json")
+        presets_helper.sanitize(preset_file, exported_config)
+        presets_helper.export_photos(exported_config, export_tmp, self.presets_dir, preset_name)
+
+        self.assertTrue(os.path.isfile(os.path.join(export_tmp, "photo0.png")))
+
+        # 4. Import on a different machine (simulated)
+        importer_presets = os.path.join(self.home, "importer_presets")
+        os.makedirs(importer_presets, exist_ok=True)
+        # Unpack exported zip: config.json -> importer preset, photo0.png -> {name}_photo0.png
+        shutil.copy2(os.path.join(export_tmp, "photo0.png"),
+                     os.path.join(importer_presets, f"{preset_name}_photo0.png"))
+        presets_helper.sanitize(exported_config, os.path.join(importer_presets, f"{preset_name}.json"))
+
+        # 5. Merge on importer machine
+        importer_config_file = os.path.join(self.home, "importer_config.json")
+        importer_base = {"background": {"activeWidgets": []}}
+        with open(importer_config_file, "w", encoding="utf-8") as f:
+            json.dump(importer_base, f)
+
+        presets_helper.merge(os.path.join(importer_presets, f"{preset_name}.json"),
+                             importer_config_file,
+                             importer_config_file,
+                             importer_presets,
+                             preset_name)
+
+        with open(importer_config_file, "r", encoding="utf-8") as f:
+            final_config = json.load(f)
+
+        imported_widget = final_config["background"]["activeWidgets"][0]
+        expected_photo_path = os.path.join(importer_presets, f"{preset_name}_photo0.png")
+        self.assertEqual(imported_widget["imagePath"], expected_photo_path)
+        self.assertTrue(os.path.isfile(imported_widget["imagePath"]))
+        with open(imported_widget["imagePath"], "rb") as f:
+            self.assertEqual(f.read(), b"PNG_CAT_DATA")
 
 
 if __name__ == "__main__":

@@ -119,6 +119,23 @@ Item {
                 }
             }
 
+            ConfigSwitch {
+                visible: EasyEffects.bothInstalled
+                buttonIcon: "deployed_code"
+                text: Translation.tr("Use the Flatpak build")
+                description: EasyEffects.preferFlatpak
+                    ? Translation.tr("Running the Flatpak (%1). Off uses the distro package (%2).").arg(EasyEffects.flatpakMajor).arg(EasyEffects.nativeMajor)
+                    : Translation.tr("Running the distro package (%1). On uses the Flatpak (%2).").arg(EasyEffects.nativeMajor).arg(EasyEffects.flatpakMajor)
+                checked: EasyEffects.preferFlatpak
+                onCheckedChanged: {
+                    if (Config.ready)
+                        EasyEffects.setPreferFlatpak(checked);
+                }
+                StyledToolTip {
+                    text: Translation.tr("Both builds are installed. Switching restarts EasyEffects if it is running.")
+                }
+            }
+
             KeyboardShortcutBox {
                 Layout.fillWidth: true
                 text: Translation.tr("Toggle EasyEffects app")
@@ -150,6 +167,63 @@ Item {
                     }
 
                     onClicked: GlobalStates.openEasyEffectsApp("")
+                }
+            }
+        }
+
+        ContentSection {
+            title: Translation.tr("Live Draw")
+            icon: "draw"
+            tooltip: Translation.tr("Draw over the screen, above every app, for recordings, calls and screen sharing.")
+
+            ConfigSwitch {
+                buttonIcon: "draw"
+                text: Translation.tr("Enable live draw")
+                description: Translation.tr("Annotate the screen over every app. Each drawing stays on the workspace it was drawn on")
+                checked: Config.options.liveDraw?.enable ?? true
+                onCheckedChanged: {
+                    if (Config.ready && Config.options.liveDraw && Config.options.liveDraw.enable !== checked) {
+                        if (!checked) {
+                            LiveDraw.close();
+                            LiveDraw.clearAll();
+                        }
+                        Config.options.liveDraw.enable = checked;
+                    }
+                }
+            }
+
+            KeyboardShortcutBox {
+                Layout.fillWidth: true
+                text: Translation.tr("Toggle live draw")
+                keys: ["Super", "Alt", "D"]
+            }
+
+            NoticeBox {
+                Layout.fillWidth: true
+                materialIcon: "tune"
+                text: Translation.tr("Pen pressure, mouse smoothing and the keyboard shortcuts are in the drawing toolbar's settings button. It also opens from the dashboard's quick toggle, the dock, the bar and the screen recording controls.")
+
+                RippleButton {
+                    implicitWidth: 120
+                    implicitHeight: 36
+                    buttonRadius: Appearance.rounding.small
+                    enabled: Config.options.liveDraw?.enable ?? true
+                    colBackground: Appearance.colors.colPrimary
+                    colBackgroundHover: Appearance.colors.colPrimaryHover
+                    colBackgroundActive: Appearance.colors.colPrimaryActive
+
+                    StyledText {
+                        anchors.centerIn: parent
+                        text: Translation.tr("Start drawing")
+                        font.pixelSize: Appearance.font.pixelSize.smaller
+                        font.weight: Font.DemiBold
+                        color: Appearance.colors.colOnPrimary
+                    }
+
+                    onClicked: {
+                        GlobalStates.settingsOpen = false;
+                        LiveDraw.open();
+                    }
                 }
             }
         }

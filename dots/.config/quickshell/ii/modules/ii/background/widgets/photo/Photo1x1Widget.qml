@@ -39,7 +39,7 @@ AbstractBackgroundWidget {
                                         : MaterialShape.Shape.Cookie9Sided
 
     readonly property string imageSource: {
-        let customPath = options?.imagePath;
+        let customPath = root.instanceImagePath !== undefined ? root.instanceImagePath : options?.imagePath;
         if (customPath && customPath !== "") {
             const qIdx = customPath.indexOf("?");
             if (qIdx !== -1) customPath = customPath.substring(0, qIdx);
@@ -209,5 +209,14 @@ AbstractBackgroundWidget {
             color: Appearance.colors.colOnLayer0
             opacity: 0.50
         }
+    }
+
+    // Drop an image from the file manager to replace this widget's picture.
+    PhotoDropArea {
+        anchors.fill: parent
+        entryName: root.configEntryName
+        instanceId: root.widgetInstance?.id ?? ""
+        shapeMode: root.isRectangle ? "rectangle" : "materialShape"
+        materialShape: root.chosenShape
     }
 }

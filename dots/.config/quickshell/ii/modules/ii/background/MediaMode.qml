@@ -93,11 +93,8 @@ Item { // Fullscreen MediaMode instance
     property string artUrl: applicationsSource
         ? MprisController.artUrl
         : (LocalMediaService.player?.trackArtUrl ?? "")
-    property string artDownloadLocation: Directories.coverArt
-    property string artFileName: Qt.md5(artUrl)
-    property string artFilePath: `${artDownloadLocation}/${artFileName}`
-    property bool downloaded: false
-    property string displayedArtFilePath: ""
+    readonly property string displayedArtFilePath: CoverArt.source(root.artUrl)
+    readonly property bool downloaded: root.displayedArtFilePath !== ""
     property bool fileBrowserOpen: false
     property bool showAudioOutputDialog: false
     readonly property bool immersive: Config.options.background.mediaMode.immersive ?? false
@@ -146,7 +143,10 @@ Item { // Fullscreen MediaMode instance
     }
 
     // Mode state options (Bound to Config.options.background.mediaMode)
-    property int visualizerMode: Config.options.background.mediaMode.visualizerMode ?? 1 // 0: Off, 1: Waves, 2: Bars, 3: Radial
+    property int visualizerMode: Config.options.background.mediaMode.visualizerMode ?? 1 // 0: Off, 1: Waves, 2: Bars, 3: Radial, 4: Halo, 5: Spectrum
+    readonly property var visualizerModeNames: [Translation.tr("Off"), Translation.tr("Waves"), Translation.tr("Bars"),
+        Translation.tr("Radial"), Translation.tr("Halo"), Translation.tr("Spectrum")]
+    readonly property var visualizerModeIcons: ["equalizer", "waves", "bar_chart", "blur_circular", "fit_screen", "flare"]
     property bool showLyricsPanel: Config.options.background.mediaMode.showLyrics ?? true
     property bool showPlayerSwitcher: Config.options.background.mediaMode.showPlayerSwitcher ?? true
 
@@ -237,49 +237,8 @@ Item { // Fullscreen MediaMode instance
 
     onTrackTitleChanged: Persistent.states.background.mediaMode.userScrollOffset = 0
 
-    function updateArt() {
-        if (!root.artUrl) {
-            root.displayedArtFilePath = "";
-            root.downloaded = false;
-            return;
-        }
-        if (root.artUrl && root.artUrl.startsWith("file://")) {
-            root.displayedArtFilePath = root.artUrl;
-            root.downloaded = true;
-            return;
-        }
-
-        coverArtDownloader.targetFile = root.artUrl;
-        coverArtDownloader.artFilePath = root.artFilePath;
-        root.displayedArtFilePath = "";
-        root.downloaded = false;
-        coverArtDownloader.running = true;
-    }
-
     function refreshArtwork() {
-        root.displayedArtFilePath = "";
-        root.updateArt();
-    }
-
-    onArtFilePathChanged: {
-        if (!root.artUrl || root.artUrl.length == 0) {
-            root.displayedArtFilePath = "";
-            return;
-        }
-        updateArt();
-    }
-
-    Process { // Cover art downloader
-        id: coverArtDownloader
-        property string targetFile: root.artUrl
-        property string artFilePath: root.artFilePath
-        command: ["bash", "-c", `[ -f '${artFilePath}' ] || curl -sSL '${targetFile}' -o '${artFilePath}'`]
-        onExited: (exitCode, exitStatus) => {
-            if (exitCode === 0) {
-                root.displayedArtFilePath = Qt.resolvedUrl(root.artFilePath);
-                root.downloaded = true;
-            }
-        }
+        CoverArt.retry(root.artUrl);
     }
 
     ColorQuantizer {
@@ -660,6 +619,31 @@ Item { // Fullscreen MediaMode instance
                     }
                 }
 
+                // Screen-edge halo and outward circle spectrum (shaders)
+                HaloVisualizer {
+                    anchors.fill: parent
+                    visible: root.visualizerMode === 4
+                    z: 3
+                    live: root.player?.isPlaying ?? false
+                    points: root.visualizerPoints
+                    coreColor: root.dynamicAccentColor
+                    colorA: Appearance.colors.colPrimary
+                    colorB: Appearance.colors.colTertiary
+                }
+
+                CircleSpectrumVisualizer {
+                    anchors.centerIn: parent
+                    width: Math.min(parent.width, parent.height) * 0.7
+                    height: width
+                    visible: root.visualizerMode === 5
+                    z: 3
+                    live: root.player?.isPlaying ?? false
+                    points: root.visualizerPoints
+                    coreColor: root.dynamicAccentColor
+                    colorA: Appearance.colors.colPrimary
+                    colorB: Appearance.colors.colTertiary
+                }
+
                 // Main Fullscreen Content Column
                 ColumnLayout {
                     anchors.fill: parent
@@ -906,24 +890,16 @@ Item { // Fullscreen MediaMode instance
                                     anchors.centerIn: parent
                                     iconSize: 20
                                     color: root.dynamicOnAccentContainer
-                                    text: {
-                                        if (root.visualizerMode === 1)
-                                            return "waves";
-                                        if (root.visualizerMode === 2)
-                                            return "bar_chart";
-                                        if (root.visualizerMode === 3)
-                                            return "blur_circular";
-                                        return "equalizer";
-                                    }
+                                    text: root.visualizerModeIcons[root.visualizerMode] ?? "equalizer"
                                 }
 
                                 onClicked: {
-                                    var nextMode = (root.visualizerMode + 1) % 4;
+                                    var nextMode = (root.visualizerMode + 1) % root.visualizerModeNames.length;
                                     Config.options.background.mediaMode.visualizerMode = nextMode;
                                 }
 
                                 PopupToolTip {
-                                    text: Translation.tr("Visualizer Mode: ") + (root.visualizerMode === 1 ? Translation.tr("Waves") : (root.visualizerMode === 2 ? Translation.tr("Bars") : (root.visualizerMode === 3 ? Translation.tr("Radial") : Translation.tr("Off"))))
+                                    text: Translation.tr("Visualizer Mode: ") + (root.visualizerModeNames[root.visualizerMode] ?? Translation.tr("Off"))
                                 }
                             }
 
@@ -1002,12 +978,15 @@ Item { // Fullscreen MediaMode instance
                                         text: "remove"
                                     }
 
+                                    autoRepeat: true
+                                    autoRepeatDelay: 400
+                                    autoRepeatInterval: 90
                                     onClicked: {
-                                        Config.options.background.mediaMode.lyricsOffsetMs = (Config.options.background.mediaMode.lyricsOffsetMs ?? 0) - 250;
+                                        Config.options.background.mediaMode.lyricsOffsetMs = (Config.options.background.mediaMode.lyricsOffsetMs ?? 0) - 50;
                                     }
 
                                     PopupToolTip {
-                                        text: Translation.tr("Nudge Lyrics -250ms (Earlier)")
+                                        text: Translation.tr("Delay lyrics by 50 ms")
                                     }
                                 }
 
@@ -1026,12 +1005,15 @@ Item { // Fullscreen MediaMode instance
                                         text: "add"
                                     }
 
+                                    autoRepeat: true
+                                    autoRepeatDelay: 400
+                                    autoRepeatInterval: 90
                                     onClicked: {
-                                        Config.options.background.mediaMode.lyricsOffsetMs = (Config.options.background.mediaMode.lyricsOffsetMs ?? 0) + 250;
+                                        Config.options.background.mediaMode.lyricsOffsetMs = (Config.options.background.mediaMode.lyricsOffsetMs ?? 0) + 50;
                                     }
 
                                     PopupToolTip {
-                                        text: Translation.tr("Nudge Lyrics +250ms (Later)")
+                                        text: Translation.tr("Advance lyrics by 50 ms")
                                     }
                                 }
                             }

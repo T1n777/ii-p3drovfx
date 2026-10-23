@@ -253,9 +253,9 @@ Singleton {
             preferredSide: "left",
             canDetach: true,
             settleMs: 1500,
-            compact: { width: 140, height: -1 },
+            compact: { width: 172, height: -1 },
             orb: { size: -1 },
-            expanded: { width: 340, height: 68 },
+            expanded: { width: 388, height: 68 },
             content: {
                 expanded: "activities/recording/RecordingExpanded.qml"
             }
@@ -608,6 +608,25 @@ Singleton {
             compact: { width: 200, height: -1 },
             orb: { size: -1 },
             expanded: { width: 0, height: 0 },   // no expanded face: expanding opens the dashboard
+            content: {}
+        },
+        {
+            // A new critical System Health problem — a service failed, a program
+            // crashed — with the fix as its button. See HealthSource; without the
+            // island it is a notification.
+            id: "health",
+            legacyContent: "FloatingNotchHealth.qml",
+            tier: "transient",
+            icon: "monitor_heart",
+            label: "System Health alerts",
+            preferredSide: "left",
+            canDetach: false,
+            interactive: true,         // the fix is a button: hovering must not open the dashboard
+            settleMs: 0,
+            ttlMs: 9000,
+            compact: { width: 420, height: 64 },
+            orb: { size: -1 },
+            expanded: { width: 0, height: 0 },
             content: {}
         },
         {

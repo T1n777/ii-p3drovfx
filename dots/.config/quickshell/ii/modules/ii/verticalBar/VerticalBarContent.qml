@@ -74,6 +74,10 @@ Item { // Bar content region
     readonly property bool isDynamicIsland: BarInteraction.cornerStyle === 3
     readonly property bool isHugIslandMode: root.isIslandMode && BarInteraction.cornerStyle === 0
 
+    // Float + Connect: an open sidebar card is fused with the bar, and the top layer
+    // paints the two as one shape with one shadow, so the bar's own pill steps aside.
+    property bool fusedToSidebar: false
+
     // Hug/Rect vertical bars are welded to the wrapped frame ring, so the shell
     // shadow is generated once in WrappedFrameVisuals, underneath every panel.
     // Float and Dynamic Island bars keep their own shadow: they really do float
@@ -84,7 +88,12 @@ Item { // Bar content region
     readonly property string barEdge: Config.options.bar.bottom ? "right" : "left"
     readonly property real frameThickness: Config.options.appearance.fakeScreenRounding === 3 ? Config.options.appearance.wrappedFrameThickness : 0
 
-    property color islandFillColor: Config.options.bar.expressiveColors ? root.activeTheme.barBackground : Appearance.colors.colLayer0
+    // What the Dynamic Island pill takes of the edge: its height and the concave fillet
+    // it flares into the screen edge above and below. Read by the bar window, which
+    // publishes it for the dock (GlobalStates.barIslands).
+    readonly property real islandExtent: root.isDynamicIsland ? barBackground.height + 2 * barBackground.islandRadius : 0
+
+    property color islandFillColor: Config.options.bar.amoledBackground ? "#000000" : Config.options.bar.expressiveColors ? root.activeTheme.barBackground : Appearance.colors.colLayer0
 
     // Background
     Rectangle {
@@ -101,7 +110,7 @@ Item { // Bar content region
             bottomMargin: (BarInteraction.cornerStyle === 1) ? Appearance.sizes.hyprlandGapsOut : 0
         }
 
-        property color actualColor: root.showBarBackground ? (Config.options.bar.expressiveColors ? activeTheme.barBackground : Appearance.colors.colLayer0) : "transparent"
+        property color actualColor: root.showBarBackground ? (Config.options.bar.amoledBackground ? "#000000" : Config.options.bar.expressiveColors ? activeTheme.barBackground : Appearance.colors.colLayer0) : "transparent"
         Behavior on actualColor {
             animation: Appearance.animation.elementMoveFast.colorAnimation.createObject(barBackground)
         }
@@ -131,7 +140,7 @@ Item { // Bar content region
         width: root.isDynamicIsland ? Math.max(0, parent.width - root.frameThickness) : parent.width
         height: root.isDynamicIsland ? (Math.max(islandSections.implicitHeight + 24, 200)) : parent.height
 
-        color: (root.isIslandMode || root.weldedToFrame) ? "transparent" : barBackground.actualColor
+        color: (root.isIslandMode || root.weldedToFrame || root.fusedToSidebar) ? "transparent" : barBackground.actualColor
         readonly property real availablePillExtension: Math.max(0, width)
         readonly property real islandRadius: Math.min(Appearance.rounding.screenRounding, Math.floor(availablePillExtension / 2))
         property real baseRadius: root.isDynamicIsland ? islandRadius : (BarInteraction.cornerStyle === 1 || Config.options.appearance.fakeScreenRounding === 4 ? Appearance.rounding.full : 0)
@@ -155,7 +164,7 @@ Item { // Bar content region
             }
         }
 
-        layer.enabled: !root.isIslandMode && !root.weldedToFrame && Config.options.bar.dropShadow && !ShellModePolicy.barDropShadowBlocked
+        layer.enabled: !root.isIslandMode && !root.weldedToFrame && !root.fusedToSidebar && Config.options.bar.dropShadow && !ShellModePolicy.barDropShadowBlocked
         layer.effect: MultiEffect {
             shadowEnabled: true
             shadowColor: Qt.rgba(0, 0, 0, 0.28)
@@ -460,8 +469,8 @@ Item { // Bar content region
             Brightness.increaseBrightness()
         onMovedAway: GlobalStates.osdBrightnessOpen = false
         onPressed: event => {
-            if (event.button === Qt.LeftButton)
-                GlobalStates.sidebarLeftOpen = !GlobalStates.sidebarLeftOpen;
+            if (event.button === Qt.LeftButton && Config.options.bar.sidebarClickOpen)
+                GlobalStates.toggleLeftSidebar(root.screen?.name);
         }
     }
 
@@ -606,9 +615,8 @@ Item { // Bar content region
             Audio.incrementVolume()
         onMovedAway: GlobalStates.osdVolumeOpen = false
         onPressed: event => {
-            if (event.button === Qt.LeftButton) {
-                GlobalStates.sidebarRightOpen = !GlobalStates.sidebarRightOpen;
-            }
+            if (event.button === Qt.LeftButton && Config.options.bar.sidebarClickOpen)
+                GlobalStates.toggleRightSidebar(root.screen?.name);
         }
     }
 }

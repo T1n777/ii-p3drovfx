@@ -38,6 +38,25 @@ Scope { // Scope
     readonly property real bottomBarOffset: !BarPlacement.vertical && BarPlacement.bottom && GlobalStates.barOpen ? Appearance.sizes.barHeight : 0
     readonly property real leftBarOffset: BarPlacement.vertical && !BarPlacement.bottom && isOnLeft && GlobalStates.barOpen ? Appearance.sizes.verticalBarWindowWidth : 0
     readonly property real rightBarOffset: BarPlacement.vertical && BarPlacement.bottom && !isOnLeft && GlobalStates.barOpen ? Appearance.sizes.verticalBarWindowWidth : 0
+    // On the bar's own side this sidebar asks the compositor to ignore every exclusive
+    // zone (so the bar's strip cannot push it), which also drops the wrapped frame's
+    // ring and a pinned dock: it ran the full screen height, under the dock. Those are
+    // taken back here, from the same numbers the zones come from.
+    readonly property bool ignoresZones: !root.pin && BarPlacement.vertical && (BarPlacement.bottom !== root.isOnLeft)
+    readonly property real frameRing: Config.options?.appearance?.fakeScreenRounding === 3 ? (Config.options?.appearance?.wrappedFrameThickness ?? 0) : 0
+    readonly property var dockInset: GlobalStates.dockInsets[root.policyMonitorName] ?? null
+    function dockZoneAt(side) {
+        return (root.dockInset && root.dockInset.side === side) ? (root.dockInset.reserved ?? 0) : 0;
+    }
+    readonly property real topZoneInset: root.ignoresZones ? root.frameRing + root.dockZoneAt("top") : 0
+    readonly property real bottomZoneInset: root.ignoresZones ? root.frameRing + root.dockZoneAt("bottom") : 0
+    // A pinned dock on the sidebar's own edge lies beside the bar, so the open content
+    // stops beside the dock too instead of covering it.
+    readonly property real sideDockInset: root.ignoresZones ? root.dockZoneAt(root.isOnLeft ? "left" : "right") : 0
+    // Respecting the zones, the surface began beside a pinned dock on this edge and slid
+    // out from under it. It takes the dock's strip back (a negative margin) so the slide
+    // starts at the screen edge like it does with no dock, and the content stops beside it.
+    readonly property real dockReclaim: (!root.pin && !root.ignoresZones) ? root.dockZoneAt(root.isOnLeft ? "left" : "right") : 0
     readonly property bool barReservesSpace: !(Config.options?.bar?.autoHide?.enable && !Config.options?.bar?.autoHide?.pushWindows)
 
     function togglePoliciesExtended() {
@@ -99,6 +118,11 @@ Scope { // Scope
             return;
         }
         togglePin();
+    }
+
+    function cycleContentTab(direction) {
+        if (root.sidebarContent && typeof root.sidebarContent.cycleTab === "function")
+            root.sidebarContent.cycleTab(direction);
     }
 
     // Reattaches the content to whichever window is currently up. Safe to call before
@@ -229,7 +253,7 @@ Scope { // Scope
             }
 
             // The surface starts at the screen edge; the open content stops beside the bar.
-            readonly property real effectiveBarOffset: root.pin ? 0 : (root.isOnLeft ? root.leftBarOffset : root.rightBarOffset)
+            readonly property real effectiveBarOffset: root.pin ? 0 : (root.isOnLeft ? root.leftBarOffset : root.rightBarOffset) + root.sideDockInset + root.dockReclaim
 
             // Setting exclusiveZone resets exclusionMode to Normal. Use the Wayland
             // sentinel directly for floating sidebars; preserve the pinned reservation.
@@ -266,6 +290,19 @@ Scope { // Scope
                 enabled: panelWindow.visible
                 onActivated: root.togglePoliciesPin()
             }
+            // Tab fields (Anime tags, wallpaper search, AI suggestions) take Tab
+            // whatever the modifiers, so Ctrl+Tab never reached the Keys handlers
+            // while one of them held focus — e.g. right after a reload.
+            Shortcut {
+                sequences: ["Ctrl+Tab", "Ctrl+PgDown"]
+                enabled: panelWindow.visible
+                onActivated: root.cycleContentTab(1)
+            }
+            Shortcut {
+                sequences: ["Ctrl+Shift+Tab", "Ctrl+Backtab", "Ctrl+PgUp"]
+                enabled: panelWindow.visible
+                onActivated: root.cycleContentTab(-1)
+            }
 
             Connections {
                 target: Hyprland
@@ -297,8 +334,8 @@ Scope { // Scope
             margins {
                 top: root.pin ? root.topBarOffset : 0
                 bottom: root.pin ? root.bottomBarOffset : 0
-                left: root.pin ? (root.barReservesSpace ? 0 : root.leftBarOffset) : 0
-                right: root.pin ? (root.barReservesSpace ? 0 : root.rightBarOffset) : 0
+                left: root.pin ? (root.barReservesSpace ? 0 : root.leftBarOffset) : (root.isOnLeft ? -root.dockReclaim : 0)
+                right: root.pin ? (root.barReservesSpace ? 0 : root.rightBarOffset) : (root.isOnLeft ? 0 : -root.dockReclaim)
             }
 
             // The embedded phone mirror's cut-out. A real scrcpy window sits
@@ -419,8 +456,8 @@ Scope { // Scope
                 color: Config.options.bar.expressiveColors ? activeTheme.barBackground : Appearance.colors.colLayer0
                 radius: (root.pin && GlobalStates.connectModeActive) ? 0 : Appearance.rounding.screenRounding - Appearance.sizes.hyprlandGapsOut + 1
                 
-                height: (root.pin && GlobalStates.connectModeActive) ? parent.height : parent.height - (Appearance.sizes.hyprlandGapsOut * 2)
-                y: (root.pin && GlobalStates.connectModeActive) ? 0 : Appearance.sizes.hyprlandGapsOut
+                height: (root.pin && GlobalStates.connectModeActive) ? parent.height : parent.height - (Appearance.sizes.hyprlandGapsOut * 2) - root.topZoneInset - root.bottomZoneInset
+                y: (root.pin && GlobalStates.connectModeActive) ? 0 : Appearance.sizes.hyprlandGapsOut + root.topZoneInset
                 width: panelWindow.sidebarWidth - Appearance.sizes.hyprlandGapsOut - Appearance.sizes.elevationMargin
                 property bool _initialized: false
 
@@ -595,6 +632,19 @@ Scope { // Scope
                 sequence: "Ctrl+P"
                 enabled: detachedSidebarRoot.visible
                 onActivated: root.togglePoliciesPin()
+            }
+            // Tab fields (Anime tags, wallpaper search, AI suggestions) take Tab
+            // whatever the modifiers, so Ctrl+Tab never reached the Keys handlers
+            // while one of them held focus — e.g. right after a reload.
+            Shortcut {
+                sequences: ["Ctrl+Tab", "Ctrl+PgDown"]
+                enabled: detachedSidebarRoot.visible
+                onActivated: root.cycleContentTab(1)
+            }
+            Shortcut {
+                sequences: ["Ctrl+Shift+Tab", "Ctrl+Backtab", "Ctrl+PgUp"]
+                enabled: detachedSidebarRoot.visible
+                onActivated: root.cycleContentTab(-1)
             }
 
             onVisibleChanged: {

@@ -17,7 +17,7 @@ GridLayout {
     implicitWidth: parent.width
     columns: 3
 
-    readonly property list<string> builtInColorSchemes: ["angel_light", "angel", "ayu", "cobalt2", "cursor", "dracula", "flexoki", "frappe", "github", "gruvbox", "kanagawa", "latte", "macchiato", "material_ocean", "matrix", "mercury", "mocha", "nord", "nothing_os", "open_code", "orng", "osaka_jade", "rose_pine", "sakura", "samurai", "synthwave84", "vercel", "vesper", "zen_burn", "zen_garden"]
+    readonly property list<string> builtInColorSchemes: ["angel_light", "amber_crt", "angel", "ayu", "bauhaus", "blueprint", "braun", "cobalt2", "cursor", "dracula", "everforest", "flexoki", "frappe", "game_boy", "github", "gruber_darker", "gruvbox", "gruvbox_hard", "gruvbox_material", "gruvbox_soft", "hazard", "kanagawa", "kodak", "latte", "legal_pad", "macchiato", "material_ocean", "matrix", "melange", "mercury", "mocha", "monokai_pro", "nord", "nothing_os", "one_dark", "open_code", "orng", "osaka_jade", "oxocarbon", "poimandres", "rose_pine", "sakura", "samurai", "solarized", "synthwave84", "teenage_engineering", "thinkpad", "tokyo_night", "vercel", "vesper", "zen_burn", "zen_garden"]
     property list<string> customColorSchemes: Config.options.appearance.customColorSchemes ?? []
 
     readonly property list<string> wallpaperColorSchemes: ["scheme-auto", "scheme-content", "scheme-tonal-spot", "scheme-fidelity", "scheme-intense", "scheme-vibrant", "scheme-fruit-salad", "scheme-expressive", "scheme-rainbow", "scheme-neutral", "scheme-monochrome"]
@@ -41,6 +41,9 @@ GridLayout {
     /// Display name of the swatch under the pointer, "" when none is.
     property string hoveredName: ""
     property bool showTooltips: true
+    /// A host with several grids stacked builds only the one on show; this is
+    /// false for the ones it has not shown yet.
+    property bool populated: true
 
     // The list can change under a live grid (Edit Mode swaps the source in
     // place); pick the loading back up for the schemes not yet reached.
@@ -49,7 +52,7 @@ GridLayout {
     }
 
     Repeater {
-        model: root.colorSchemes
+        model: root.populated ? root.colorSchemes : []
         
         delegate: ColorPreviewButton {
             Layout.fillWidth: true

@@ -16,6 +16,17 @@ Item {
     property var sections: []
     property var fileSources: ({})
     property var fileImportsBySource: ({})
+    // Headings, labels and chips the redesigned pages draw outside any cloneable
+    // control ({ pageId, subPage, key, text, subPageTitle }); see scripts/settings/search_landmarks.py.
+    property var landmarks: []
+    // Clone sources of the settings components that draw landmarks, by block id:
+    // { type, source, imports, dir, rootId }.
+    property var landmarkBlocks: ({})
+    // Components are built live; past this many per query the rest stay links.
+    readonly property int maxComponentsPerQuery: 3
+    readonly property int maxLandmarksPerGroup: 6
+    property bool _sectionsDone: false
+    property bool _landmarksDone: false
     property bool settingsActive: false
     property bool indexing: false
     property bool indexed: false
@@ -39,9 +50,13 @@ Item {
         sections = [];
         fileSources = ({});
         fileImportsBySource = ({});
+        landmarks = [];
+        landmarkBlocks = ({});
         root._memoResults = null;
         root.indexed = false;
         root.indexing = true;
+        root._sectionsDone = false;
+        root._landmarksDone = false;
         let configRoot = FileUtils.trimFileProtocol(Directories.config) + "/quickshell/ii/";
         let basePath = configRoot + "modules/settings/configs/";
 
@@ -51,9 +66,14 @@ Item {
         for (let p of SettingsPageRegistry.pages) {
             if (p.searchable === false)
                 continue;
-            files.push(configRoot + p.component);
-            ids.push(p.id);
-            subPages.push("");
+            // A page drawn with tiles, cards and live previews can have its options
+            // indexed through `searchSources` alone: its own file would add the
+            // sections whose controls name page ids, which a clone cannot resolve.
+            if (p.searchComponent !== false) {
+                files.push(configRoot + p.component);
+                ids.push(p.id);
+                subPages.push("");
+            }
             for (let sub of (p.subPages ?? [])) {
                 files.push(basePath + sub);
                 ids.push(p.id);
@@ -63,22 +83,38 @@ Item {
             // are not sub-pages. Index them with an empty subPage so a search
             // result navigates to the parent page and waits for the section's
             // own lazy loader instead of trying to open the source as a page.
+            // A source that stands in for a sub-page's options opens that
+            // sub-page instead (`searchSubPages`).
             for (let source of (p.searchSources ?? [])) {
                 files.push(basePath + source);
                 ids.push(p.id);
-                subPages.push("");
+                subPages.push(p.searchSubPages?.[source] ?? "");
             }
         }
 
         pageFile.start(files, ids, subPages);
         listPresetsSearchProc.running = false;
         listPresetsSearchProc.running = true;
+        landmarkCrawler.start(configRoot);
 
-        if (files.length === 0) {
-            root.indexing = false;
-            root.indexed = true;
-            root.indexReady();
-        }
+        if (files.length === 0)
+            root.partIndexed("sections");
+    }
+
+    // Sections and landmarks are read side by side; the index is ready when both are.
+    function partIndexed(part) {
+        if (!root.indexing)
+            return;
+        if (part === "sections")
+            root._sectionsDone = true;
+        else
+            root._landmarksDone = true;
+        if (!root._sectionsDone || !root._landmarksDone)
+            return;
+        root.indexing = false;
+        root.indexed = true;
+        root._memoResults = null;
+        root.indexReady();
     }
 
     function setSettingsActive(active) {
@@ -100,10 +136,13 @@ Item {
         root.sections = [];
         root.fileSources = ({});
         root.fileImportsBySource = ({});
+        root.landmarks = [];
+        root.landmarkBlocks = ({});
         root._memoResults = null;
         root._memoQuery = "";
         root.currentSearch = "";
         pageFile.cancel();
+        landmarkCrawler.cancel();
         listPresetsSearchProc.running = false;
     }
 
@@ -150,14 +189,12 @@ Item {
         }
 
         function finishIndexing() {
-            root.indexing = false;
-            root.indexed = true;
             path = "";
             files = [];
             pageIds = [];
             subPages = [];
             currentIndex = 0;
-            root.indexReady();
+            root.partIndexed("sections");
         }
 
         onLoaded: {
@@ -182,6 +219,86 @@ Item {
                 Qt.callLater(() => loadNext());
             }
         }
+    }
+
+    // Landmarks come from scripts/settings/search_landmarks.py, one run per
+    // index: crawling the page component trees here held the UI thread for
+    // seconds.
+    QtObject {
+        id: landmarkCrawler
+
+        property bool active: false
+
+        function start(configRoot) {
+            cancel();
+            active = true;
+            const pages = SettingsPageRegistry.pages.map(p => ({
+                id: p.id,
+                component: p.component,
+                subPages: p.subPages ?? [],
+                searchable: p.searchable !== false
+            }));
+            landmarkReader.command = ["python3", Directories.scriptPath + "/settings/search_landmarks.py",
+                configRoot, JSON.stringify(pages)];
+            landmarkWatchdog.restart();
+            landmarkReader.running = true;
+        }
+
+        function cancel() {
+            active = false;
+            landmarkWatchdog.stop();
+            landmarkReader.running = false;
+        }
+
+        function received(text) {
+            if (!active)
+                return;
+            let payload = null;
+            try {
+                payload = JSON.parse(text);
+            } catch (e) {
+                failed();
+                return;
+            }
+            root.landmarkBlocks = payload.blocks ?? ({});
+            root.landmarks = (payload.landmarks ?? []).map(l => ({
+                pageId: l.pageId,
+                subPage: l.subPage,
+                key: l.key,
+                block: l.block ?? "",
+                text: Translation.tr(l.key),
+                subPageTitle: l.subPageTitle ? Translation.tr(l.subPageTitle) : ""
+            }));
+            cancel();
+            root.partIndexed("landmarks");
+        }
+
+        function failed() {
+            // Landmarks are an addition: without them the index still holds
+            // every cloneable control.
+            if (!active)
+                return;
+            console.warn("[SearchRegistry] landmark crawl failed; searching controls only");
+            cancel();
+            root.partIndexed("landmarks");
+        }
+    }
+
+    Process {
+        id: landmarkReader
+        stdout: StdioCollector {
+            id: landmarkReaderOut
+            onStreamFinished: landmarkCrawler.received(landmarkReaderOut.text)
+        }
+    }
+
+    // A reader that never starts (no python3) never finishes its stream either.
+    Timer {
+        id: landmarkWatchdog
+        // Generous: right after a reload the shell is busy recompiling and the
+        // reader's output waits for it; a run cut short loses every landmark.
+        interval: 30000
+        onTriggered: landmarkCrawler.failed()
     }
 
     Process {
@@ -435,7 +552,21 @@ Item {
             while (j < text.length && depth > 0) {
                 let ch = text[j];
 
-                if (!inString && (ch === '"' || ch === "'")) {
+                // Prose in comments ("the user's …") holds quotes and braces that
+                // are not code. Skipping them keeps one apostrophe from turning the
+                // rest of the file into a string and swallowing every section after it.
+                if (!inString && ch === "/" && (text[j + 1] === "/" || text[j + 1] === "*")) {
+                    if (text[j + 1] === "/") {
+                        const eol = text.indexOf("\n", j);
+                        j = eol === -1 ? text.length : eol;
+                    } else {
+                        const close = text.indexOf("*/", j + 2);
+                        j = close === -1 ? text.length : close + 2;
+                    }
+                    continue;
+                }
+
+                if (!inString && (ch === '"' || ch === "'" || ch === "`")) {
                     inString = true;
                     stringChar = ch;
                 } else if (inString && ch === stringChar) {
@@ -633,12 +764,141 @@ Item {
             }
         }
         
+        results.push(...matchLandmarks(query, queryTokens, results));
+        // A query that names a page ("lock screen") wants that page first, not
+        // the same words drawn on another one.
+        for (let r of results) {
+            const page = SettingsPageRegistry.pageById(r.pageId);
+            const names = [page?.name ?? "", ...(page?.aliases ?? [])];
+            if (names.some(n => n !== "" && (Translation.tr(n).toLowerCase() === query || n.toLowerCase() === query)))
+                r.score += 5000;
+        }
         results.sort((a, b) => b.score - a.score);
+        root.assignLandmarkComponents(results);
         root._memoQuery = query;
         root._memoResults = results;
         return results;
     }
     
+    function sharesToken(text, queryTokens) {
+        const tokens = tokenize(text);
+        return queryTokens.some(q => tokens.some(t => t.startsWith(q)));
+    }
+
+    /*
+     * Landmark hits, one group per page (or sub-page), as results that carry
+     * `landmarks` instead of cloneable `items`. A heading a cloned section
+     * already shows for that page is left to the clone.
+     */
+    function matchLandmarks(query, queryTokens, sectionResults) {
+        let shown = {};
+        // Headings and control labels a clone already shows on that page (or sub-page).
+        for (let r of sectionResults) {
+            let labels = [r.title, ...r.items.map(i => i.text)];
+            for (let sub of r.subsections)
+                labels.push(sub.title, ...sub.items.map(i => i.text));
+            for (let label of labels)
+                if (label)
+                    shown[r.pageId + "|" + (r.subPage || "") + "|" + Translation.tr(label).toLowerCase()] = true;
+        }
+
+        let groups = {};
+        let order = [];
+        for (let l of root.landmarks) {
+            const lower = l.text.toLowerCase();
+            // A component that draws it still shows: it is what is on the page,
+            // the clone may come from a search proxy. As a row it is dropped.
+            const duplicate = !!shown[l.pageId + "|" + l.subPage + "|" + lower];
+            if (duplicate && !l.block)
+                continue;
+            let score = getMatchScore(l.text, query, queryTokens);
+            if (score === 0 && l.key !== l.text)
+                score = getMatchScore(l.key, query, queryTokens);
+            if (score === 0) {
+                // "dock color" may name the page and a heading on it, but the
+                // heading must hold one of the words itself.
+                if (!sharesToken(l.text, queryTokens))
+                    continue;
+                const page = SettingsPageRegistry.pageById(l.pageId);
+                const context = Translation.tr(page?.name ?? "") + " " + (l.subPageTitle || "");
+                const contextScore = getMatchScore(context + " " + l.text, query, queryTokens);
+                if (contextScore === 0)
+                    continue;
+                score = Math.round(contextScore / 2);
+            }
+            // The very words of a heading: what the user is looking at.
+            if (lower === query || l.key.toLowerCase() === query)
+                score += 4000;
+
+            const groupKey = l.pageId + "|" + l.subPage;
+            if (!groups[groupKey]) {
+                const page = SettingsPageRegistry.pageById(l.pageId);
+                groups[groupKey] = {
+                    pageId: l.pageId,
+                    subPage: l.subPage,
+                    title: l.subPageTitle || Translation.tr(page?.name ?? l.pageId),
+                    icon: page?.icon ?? "",
+                    landmarks: [],
+                    items: [],
+                    subsections: [],
+                    score: 0
+                };
+                order.push(groupKey);
+            }
+            if (!groups[groupKey].landmarks.some(other => other.text.toLowerCase() === lower))
+                groups[groupKey].landmarks.push({ text: l.text, score: score, block: l.block, duplicate: duplicate });
+        }
+
+        let out = [];
+        for (let key of order) {
+            let g = groups[key];
+            g.landmarks.sort((a, b) => b.score - a.score);
+            g.landmarks = g.landmarks.slice(0, root.maxLandmarksPerGroup);
+            g.score = g.landmarks[0].score;
+            out.push(g);
+        }
+        return out;
+    }
+
+    /*
+     * The best landmark hits are shown as the component that draws them (the
+     * pane, the tile), cloned like a control; a landmark inside a component
+     * already shown is covered by it. The rest stay link rows.
+     */
+    function assignLandmarkComponents(results) {
+        let budget = root.maxComponentsPerQuery;
+        for (let r of results) {
+            if (!r.landmarks)
+                continue;
+            let components = [];
+            let covered = [];
+            let rows = [];
+            for (let l of r.landmarks) {
+                if (l.block && components.indexOf(l.block) !== -1) {
+                    covered.push(l);
+                    continue;
+                }
+                if (l.block && budget > 0 && root.landmarkBlocks[l.block]) {
+                    components.push(l.block);
+                    covered.push(l);
+                    budget--;
+                    continue;
+                }
+                if (!l.duplicate)
+                    rows.push(l);
+            }
+            r.components = components;
+            r.coveredLandmarks = covered;
+            r.landmarks = rows;
+        }
+        // A group whose only hits were duplicates of clones has nothing left.
+        for (let i = results.length - 1; i >= 0; i--) {
+            const r = results[i];
+            if (r.landmarks && r.landmarks.length === 0 && r.components.length === 0)
+                results.splice(i, 1);
+        }
+    }
+
     function getResultsRanked(text) {
         return getSearchResult(text);
     }

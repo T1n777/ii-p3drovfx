@@ -322,6 +322,21 @@ Singleton {
     property int blurSize: Config.options.appearance.blurSize ?? 8
     readonly property string blurConfigScript: HyprlandBlur.buildScript(root.blurSize, Config.options.appearance.blur)
     onBlurConfigScriptChanged: root.scheduleBlurUpdate()
+    // Compositor blur for windows and shell surfaces (Settings > Windows): "live", "xray"
+    // (only the cached wallpaper is blurred) or "off". "off" travels in blurConfigScript, so
+    // every config reload (Game Mode, routines) re-applies it; the other modes leave
+    // blur.enabled to whoever owns it, so leaving "off" has to turn blur back on - unless
+    // Game Mode (animations off) is holding it off.
+    readonly property string compositorBlurMode: Config.options.appearance.blur?.mode ?? "live"
+    readonly property bool compositorBlurOff: root.compositorBlurMode === "off"
+    onCompositorBlurOffChanged: {
+        if (Config.ready && !root.compositorBlurOff)
+            Quickshell.execDetached(["sh", "-c", "hyprctl getoption animations:enabled -j | grep -qE '\"(int|bool)\": *(0|false)' "
+                + "|| hyprctl eval 'hl.config({ decoration = { blur = { enabled = true } } })'"]);
+    }
+    onCompositorBlurModeChanged: root.pushHyprlandLayerRules()
+    readonly property bool opaqueWindows: Config.options.appearance.blur?.opaqueWindows ?? false
+    onOpaqueWindowsChanged: root.pushHyprlandLayerRules()
     property bool _blurUpdatePending: false
     property bool _blurLayerRulesPending: false
 
@@ -372,7 +387,28 @@ Singleton {
     // Dynamic Island variants use colLayer0, whose opacity follows the
     // configured background transparency. Keep the threshold below that
     // rendered opacity, otherwise the entire island is excluded from blur.
-    readonly property real barIgnoreAlpha: Math.min(root.ignoreAlpha, Math.max(0, 1 - root.backgroundTransparency - 0.01))
+    //
+    // A transparent bar (barBackgroundStyle 0) draws only the group pills, which
+    // are colLayer1 (content transparency), and their rounded edges are
+    // antialiased. A low threshold blurs every partly covered edge pixel too, so
+    // a 1px ring of the blurred backdrop (bright wherever a window sits under
+    // the bar) outlines each pill. Hold the threshold just under the pill's own
+    // opacity: the body still blurs, the edge pixels keep the sharp backdrop.
+    readonly property real barIgnoreAlpha: (Config.options?.bar?.barBackgroundStyle ?? 1) === 0
+        ? Math.max(0, 1 - root.contentTransparency - 0.01)
+        : root.islandIgnoreAlpha
+    // The island always paints colLayer0 (background transparency), whatever the
+    // bar style: tying it to the transparent bar's pill opacity put the threshold
+    // above the island's own alpha and dropped its blur.
+    readonly property real islandIgnoreAlpha: Math.min(root.ignoreAlpha, Math.max(0, 1 - root.backgroundTransparency - 0.01))
+
+    // The dock's tray is colLayer0 (background transparency): hold the threshold just
+    // under it, as for the bar, or every antialiased edge of its widgets blurs too and
+    // a ring of the bright backdrop outlines each one. On the wrapped frame's band the
+    // dock paints no tray at all - the band below already carries the blur - so only
+    // opaque pixels pass. Set by the dock (Dock.qml), which knows when it is on the band.
+    property bool dockOnFrameBand: false
+    readonly property real dockIgnoreAlpha: root.dockOnFrameBand ? 0.99 : Math.max(0, 1 - root.backgroundTransparency - 0.01)
 
     // Popups only need compositor blur when transparency is enabled; for opaque popups,
     // compositor blur behind a 100% opaque surface is completely invisible and causes
@@ -380,13 +416,70 @@ Singleton {
     readonly property bool popupBlurEnabled: (Config.options?.appearance?.transparency?.enable ?? false) && (Config.options?.appearance?.transparency?.popups ?? false)
     readonly property real popupIgnoreAlpha: Math.min(root.ignoreAlpha, Math.max(0, 1 - root.backgroundTransparency - 0.01))
 
+    // Desktop widgets: compositor blur behind a see-through widget background.
+    // Their background alpha (the scheme surface times the tint, set by
+    // WidgetColorScheme) bounds the threshold - above it the whole card would be
+    // left unblurred. Opaque widgets need no blur, and a screen whose widgets blur
+    // themselves under open windows (BackgroundWidgetsWindow) turns it off: over the
+    // already blurred wallpaper it only adds a hard-edged, noise-grained patch.
+    // Every screen's widget layer has its own namespace (quickshell:backgroundWidgets:<screen>),
+    // so each gets its own rule and one screen's windows never touch another's glass.
+    // Bound by BackgroundWidgetsWindow, so the two singletons never build each other.
+    property real widgetBackgroundAlpha: 1
+    property var widgetSelfBlurScreens: ({})
+    function setWidgetSelfBlur(screenName: string, active: bool): void {
+        if (screenName === "" || root.widgetSelfBlurScreens[screenName] === active)
+            return;
+        const next = Object.assign({}, root.widgetSelfBlurScreens);
+        next[screenName] = active;
+        root.widgetSelfBlurScreens = next;
+    }
+    function forgetWidgetScreen(screenName: string): void {
+        if (!(screenName in root.widgetSelfBlurScreens))
+            return;
+        const next = Object.assign({}, root.widgetSelfBlurScreens);
+        delete next[screenName];
+        root.widgetSelfBlurScreens = next;
+    }
+    // Screens whose desktop shows a glass app group: the group is the only
+    // translucent thing there when the widgets are opaque, so it asks for the
+    // compositor blur on its own.
+    property var desktopGlassScreens: ({})
+    function setDesktopGlass(screenName: string, active: bool): void {
+        if (screenName === "" || (root.desktopGlassScreens[screenName] === true) === active)
+            return;
+        const next = Object.assign({}, root.desktopGlassScreens);
+        if (active)
+            next[screenName] = true;
+        else
+            delete next[screenName];
+        root.desktopGlassScreens = next;
+    }
+    // A glass group's alpha: always above the blur's ignore_alpha, so it is
+    // blurred whatever the widgets do.
+    readonly property real desktopGlassAlpha: Math.max(0.4, root.ignoreAlpha + 0.08)
+    readonly property bool backgroundWidgetsTranslucent: root.widgetBackgroundAlpha > 0.01 && root.widgetBackgroundAlpha < 0.99
+    readonly property real backgroundWidgetsIgnoreAlpha: Math.min(root.ignoreAlpha, Math.max(0, root.widgetBackgroundAlpha - 0.01))
+    // Serialised so the rules are re-pushed only when a screen's answer changes.
+    readonly property string backgroundWidgetsRules: {
+        let out = "";
+        for (const screen of Object.keys(root.widgetSelfBlurScreens)) {
+            const blur = (root.backgroundWidgetsTranslucent || root.desktopGlassScreens[screen] === true) && root.widgetSelfBlurScreens[screen] !== true;
+            out += "hl.layer_rule({ name = 'ii:appearance:background-widgets:" + screen + "', match = { namespace = '^quickshell:backgroundWidgets:" + screen + "$' }, blur = "
+                + (blur ? "true" : "false") + ", ignore_alpha = " + root.backgroundWidgetsIgnoreAlpha + " }) ";
+        }
+        return out;
+    }
+
     function getLayerRulesScript(): string {
         var a = root.ignoreAlpha;
         var barA = root.barIgnoreAlpha;
         var script = "";
         // Named rules merge on re-declaration: dragging Ignore Alpha must update
         // the existing rules, not keep adding anonymous rules to the compositor.
-        script += "hl.layer_rule({ name = 'ii:appearance:layers', match = { namespace = 'quickshell.*' }, blur = true, blur_popups = true, ignore_alpha = " + a + " }) ";
+        // xray is explicit: rules.lua turns it off for every shell layer.
+        const xray = root.compositorBlurMode === "xray" ? "true" : "false";
+        script += "hl.layer_rule({ name = 'ii:appearance:layers', match = { namespace = 'quickshell.*' }, blur = true, blur_popups = true, xray = " + xray + ", ignore_alpha = " + a + " }) ";
         if (root.popupBlurEnabled) {
             var popupA = root.popupIgnoreAlpha;
             script += "hl.layer_rule({ name = 'ii:appearance:popup-family', match = { namespace = 'quickshell:.*[pP]opup' }, blur = true, blur_popups = true, ignore_alpha = " + popupA + " }) ";
@@ -395,12 +488,13 @@ Singleton {
             script += "hl.layer_rule({ name = 'ii:appearance:popup-family', match = { namespace = 'quickshell:.*[pP]opup' }, blur = false, blur_popups = false, ignore_alpha = 0.5 }) ";
             script += "hl.layer_rule({ name = 'ii:appearance:popup', match = { namespace = 'quickshell:popup' }, blur = false, blur_popups = false, ignore_alpha = 0.5 }) ";
         }
-        script += "hl.layer_rule({ name = 'ii:appearance:bar', match = { namespace = 'quickshell:(bar|floatingNotch)' }, blur = true, ignore_alpha = " + barA + " }) ";
+        script += "hl.layer_rule({ name = 'ii:appearance:bar', match = { namespace = 'quickshell:bar' }, blur = true, xray = " + xray + ", ignore_alpha = " + barA + " }) ";
+        script += "hl.layer_rule({ name = 'ii:appearance:dock', match = { namespace = 'quickshell:dock' }, blur = true, xray = " + xray + ", ignore_alpha = " + root.dockIgnoreAlpha + " }) ";
+        script += "hl.layer_rule({ name = 'ii:appearance:island', match = { namespace = 'quickshell:floatingNotch' }, blur = true, xray = " + xray + ", ignore_alpha = " + root.islandIgnoreAlpha + " }) ";
         script += "hl.layer_rule({ name = 'ii:appearance:background', match = { namespace = 'quickshell:background' }, blur = false }) ";
-        // The widgets blur themselves when a window is open (BackgroundWidgetsWindow); compositor
-        // blur on top would frost the wallpaper wherever the soft halo crosses ignore_alpha,
-        // leaving a hard-edged, noise-grained patch around every widget.
-        script += "hl.layer_rule({ name = 'ii:appearance:background-widgets', match = { namespace = 'quickshell:backgroundWidgets' }, blur = false }) ";
+        // See backgroundWidgetsRules. Re-declared on every change; rules.lua keeps them off
+        // until the shell has pushed these.
+        script += root.backgroundWidgetsRules;
         // Both Media Mode designs share this namespace. The classic one relies on
         // compositor blur; the Immersive one draws its own and, over the music video,
         // compositor blur would hit only the pixels above ignore_alpha and carve
@@ -415,6 +509,11 @@ Singleton {
         // These layer surfaces animate their content with the Windows preset. Never also
         // animate the fullscreen transparent layer (or alter animations for other overlays).
         script += "hl.layer_rule({ name = 'ii:appearance:window-animation-overlays', match = { namespace = '^quickshell:(usage|modes|cheatsheet)$' }, no_anim = true }) ";
+        // Opaque app windows (Settings > Windows). A named rule cannot be dropped at
+        // runtime, so turning it off re-declares it with a match nothing has.
+        script += root.opaqueWindows
+            ? "hl.window_rule({ name = 'ii:appearance:opaque-windows', match = { class = '.*' }, opacity = '1.0 override 1.0 override 1.0 override', opaque = true }) "
+            : "hl.window_rule({ name = 'ii:appearance:opaque-windows', match = { class = '^ii-no-window-has-this-class$' } }) ";
         // ignore_alpha is a layer effect, not a supported window-rule field.
         script += "hl.window_rule({ name = 'ii:appearance:settings', match = { title = '^(illogical-impulse Settings)$' }, no_blur = false }) ";
         return script;
@@ -430,6 +529,8 @@ Singleton {
 
     onIgnoreAlphaChanged: root.pushHyprlandLayerRules()
     onBarIgnoreAlphaChanged: root.pushHyprlandLayerRules()
+    onDockIgnoreAlphaChanged: root.pushHyprlandLayerRules()
+    onBackgroundWidgetsRulesChanged: root.pushHyprlandLayerRules()
     onPopupBlurEnabledChanged: root.pushHyprlandLayerRules()
     onPopupIgnoreAlphaChanged: root.pushHyprlandLayerRules()
     readonly property bool mediaModeImmersive: Config.options?.background?.mediaMode?.immersive ?? false
@@ -596,6 +697,25 @@ Singleton {
                     "wght": 550,
                     "ROND": 100
                 })
+
+            // Every distinct axes value makes Qt open a new FreeType face of the font: a
+            // fresh 4 MB mmap of the whole file (~1.4 MB resident, never shared in RSS) that
+            // the font cache only trims ~5 engines per 10 s. An axis that follows an animated
+            // value therefore creates one face per frame, hundreds per session (that was the
+            // 1.5 -> 2.2 GB regression). Interpolated axes must go through blend()/snap(),
+            // which keep the number of distinct values to steps + 1 per pair of endpoints.
+            readonly property int steps: 3
+            function snap(t: real): real {
+                return Math.round(Math.max(0, Math.min(1, t)) * steps) / steps;
+            }
+            function blend(from: real, to: real, t: real): real {
+                return Math.round(from + (to - from) * snap(t));
+            }
+            // For an axis that carries meaning along its whole range (a clock whose width
+            // tracks the minute): n steps instead of the shell-wide default.
+            function blendIn(from: real, to: real, t: real, n: int): real {
+                return Math.round(from + (to - from) * Math.round(Math.max(0, Math.min(1, t)) * n) / n);
+            }
         }
         property QtObject pixelSize: QtObject {
             property int smallest: 10
@@ -993,6 +1113,9 @@ Singleton {
         // The M3 toolbar's height: one number the toolbar and the band Edit Mode reserves for it
         // both read.
         property real toolbarHeight: 46
+        // Edit Mode's toolbar: taller than the M3 default, so its groups read
+        // as surfaces of their own (EditModeChromeContent, EditModeInsets).
+        property real editModeToolbarHeight: 60
         // Edit Mode's viewport: the gap between the shrunk desktop and what surrounds it, the
         // tighter gap between the chrome and the usable area's edge, and the width the widget
         // drawer opens into (reserved from the first frame so the desktop never resizes mid-edit).

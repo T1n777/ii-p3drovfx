@@ -31,6 +31,8 @@ UtilityTile {
     readonly property var tools: {
         const list = [];
         for (const id of tile.shownIds) {
+            if (id === "liveDraw" && !LiveDraw.enabled)
+                continue;
             list.push(tile.look(id));
             if (id === "screenRecord" && tile.recording)
                 list.push(tile.look("recordPause"));
@@ -52,6 +54,9 @@ UtilityTile {
         case "recordPause":
             tool.symbol = tile.recordPaused ? "play_arrow" : "pause";
             tool.title = tile.recordPaused ? Translation.tr("Resume recording") : Translation.tr("Pause recording");
+            break;
+        case "liveDraw":
+            tool.active = LiveDraw.trayOpen;
             break;
         case "keyboard":
             tool.active = GlobalStates.oskOpen;
@@ -125,6 +130,9 @@ UtilityTile {
             break;
         case "colorPicker":
             GlobalStates.launchColorPicker();
+            break;
+        case "liveDraw":
+            LiveDraw.toggle();
             break;
         case "keyboard":
             GlobalStates.oskOpen = !GlobalStates.oskOpen;

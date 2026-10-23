@@ -155,13 +155,36 @@ Singleton {
         root.modesOpen = true;
     }
 
+    /// The System Health window (Ctrl+Super+H), built on demand like the clock app.
+    property bool healthAppOpen: false
+    /// A tab the health app should land on when it opens, consumed on arrival.
+    property string healthAppPendingTab: ""
+    /// A finding the health app should open in its sheet on arrival ("unit:user:x.service").
+    property string healthAppPendingFinding: ""
+
+    function openHealthApp(tab = "", findingId = ""): void {
+        root.healthAppPendingTab = String(tab ?? "");
+        root.healthAppPendingFinding = String(findingId ?? "");
+        root.healthAppOpen = true;
+    }
+
     property bool mediaControlsOpen: false
     property bool mediaControlsPinned: false
-    // Names of screens showing the Always On Display (the OLED saver). Independent
-    // per monitor: toggling one monitor doesn't affect the others. Read by the desktop
+    // Names of screens showing the Always On Display (the OLED saver). Read by the desktop
     // overlay (OledSaver) and, while locked, by LockSurface, BackgroundRoot and the
     // widgets window.
     property var oledSaverMonitors: []
+
+    function toggleOledSaver(): void {
+        if (!(Config.options?.oledSaver?.enable ?? true))
+            return;
+        const all = Quickshell.screens.map(s => s.name);
+        root.oledSaverMonitors = (root.oledSaverMonitors ?? []).length > 0 ? [] : all;
+    }
+
+    function closeOledSaver(): void {
+        root.oledSaverMonitors = [];
+    }
     // Anti burn-in pixel shift for Always On Display (OLED saver).
     // Shifts widgets every minute to a nearby position to prevent OLED burn-in.
     property real aodBurnInShiftX: 0
@@ -275,7 +298,7 @@ Singleton {
         const monitors = HyprlandData.monitors;
         if (!monitors)
             return false;
-        return monitors.some(mon => mon.specialWorkspace && mon.specialWorkspace.name !== "");
+        return monitors.some(mon => mon.specialWorkspace && mon.specialWorkspace.name !== "" && (mon.specialWorkspace.id ?? 0) !== 0);
     }
     property bool scratchpadEmptyOverlayActive: false
     readonly property bool overviewBackgroundActive: {
@@ -283,7 +306,7 @@ Singleton {
         const allowOverviewBg = Config.options && Config.options.overview && Config.options.overview.animationStyle !== "none";
         return Boolean(background && (background.useBackgroundOverviewAlways
             || (background.zoomOutEnabled
-                && ((root.classicOverviewOpen && allowOverviewBg) || root.cheatsheetOpen || root.scratchpadOpen))));
+                && ((root.classicOverviewOpen && allowOverviewBg) || root.cheatsheetOpen))));
     }
 
     // BackgroundRoot owns one controller per monitor. Other background surfaces
@@ -574,6 +597,10 @@ Singleton {
     // mode's real key surface - reads it to know when to take the keyboard back
     // (BackgroundWidgetsWindow).
     property bool editSearchFocused: false
+    // A desktop widget's text field that is being typed into (To-Do, Translator),
+    // as "<screen>|<owner>". The desktop's surface on that screen takes the
+    // keyboard while it is set (BackgroundWidgetsWindow); WidgetTextEntry owns it.
+    property string widgetTypingOwner: ""
     // Ctrl+F. The key arrives on the canvas, which is the only surface in the
     // mode holding a keyboard, and the drawer on the edited screen answers it.
     signal editSearchFocusRequested()
@@ -600,6 +627,11 @@ Singleton {
     // The desktop's right-click menu: which screen, where on it. Session
     // state like the widget menu's; exists in and out of Edit Mode.
     property bool desktopMenuOpen: false
+    // Desktop icon dialogs alive (the item menu and its rename field). They
+    // take the keyboard through a layer surface, which leaves no focused
+    // window behind: type-to-search reads this to leave their keys alone.
+    property int desktopDialogCount: 0
+    readonly property bool desktopDialogOpen: root.desktopDialogCount > 0
     // The exit runs inside the live surface (DesktopMenuCard's reveal), so
     // `open` stays true while the card plays out; only the card's
     // exitFinished may clear it, through finishDesktopMenuClose.
@@ -808,15 +840,100 @@ Singleton {
     // knows its padding and style, so the mode's viewport reads this rather
     // than deriving the dock's size a second time.
     property var dockInsets: ({})
-    function setDockInset(screenName, side, thickness) {
+    // `reserved` is the exclusive zone the dock holds for windows right now: its
+    // thickness while pinned and revealed, 0 otherwise. A surface that ignores the
+    // compositor's zones reads it to stay clear of the dock the way zone-respecting
+    // ones do. `shown` is the thickness a full-width tray covers right now, pinned
+    // or not: the top layer paints that tray as part of the wrapped frame.
+    // `concave` is the radius of the full-width rounded style's inward corners, which the
+    // top layer draws at the ends of that tray.
+    function setDockInset(screenName, side, thickness, reserved, shown, concave) {
         if (!screenName)
             return;
         const next = Object.assign({}, root.dockInsets);
         if (!side || !(thickness > 0))
             delete next[screenName];
         else
-            next[screenName] = { "side": side, "thickness": thickness };
+            next[screenName] = { "side": side, "thickness": thickness, "reserved": reserved > 0 ? reserved : 0, "shown": shown > 0 ? shown : 0, "concave": concave > 0 ? concave : 0 };
         root.dockInsets = next;
+    }
+
+    // A connected sidebar pushes a pinned vertical dock, but the dock is its own layer
+    // surface and the compositor pairs its frames with the top layer's a tick apart:
+    // followed live, it flickered beside the sliding sidebar. For the slide the dock
+    // hands a snapshot of itself to the top layer, which draws it glued to the sidebar
+    // (screen name -> { url, side, inset, y, width, height }; inset is the gap between
+    // the screen edge and the dock at rest). The top layer answers in dockPushCopyShown
+    // once a frame with the copy is on screen, and only then does the real dock hide.
+    property var dockPushCopies: ({})
+    property var dockPushCopyShown: ({})
+    function setDockPushCopy(screenName, copy) {
+        if (!screenName)
+            return;
+        const next = Object.assign({}, root.dockPushCopies);
+        if (copy)
+            next[screenName] = copy;
+        else
+            delete next[screenName];
+        root.dockPushCopies = next;
+        if (!copy)
+            root.setDockPushCopyShown(screenName, false);
+    }
+    function setDockPushCopyShown(screenName, shown) {
+        if (!screenName || !!root.dockPushCopyShown[screenName] === shown)
+            return;
+        const next = Object.assign({}, root.dockPushCopyShown);
+        if (shown)
+            next[screenName] = true;
+        else
+            delete next[screenName];
+        root.dockPushCopyShown = next;
+    }
+
+    // Screens whose top layer paints the wrapped frame's band under a top/bottom dock
+    // (screen name -> true). The dock leaves its tray to the band there: Hyprland blurs
+    // every surface on its own, so a tray of its own never matched the frame beside it,
+    // and stacked on the band the translucent fill read as a second, darker shade.
+    property var dockBandScreens: ({})
+    function setDockBand(screenName, banded) {
+        if (!screenName || !!root.dockBandScreens[screenName] === banded)
+            return;
+        const next = Object.assign({}, root.dockBandScreens);
+        if (banded)
+            next[screenName] = true;
+        else
+            delete next[screenName];
+        root.dockBandScreens = next;
+    }
+
+    // What the Dynamic Island bar style really occupies of its edge, published by the
+    // real bar window (screen name -> { edge, extent, reserve }). The style reserves a
+    // full strip for windows but draws only a pill centred in it, so a full-width dock
+    // reads this to take the strip back where the pill is not.
+    //   extent  the pill's length along the edge, concave fillets included
+    //   reserve the strip's thickness beyond the wrapped frame's own ring
+    property var barIslands: ({})
+    function setBarIsland(screenName, edge, extent, reserve) {
+        if (!screenName)
+            return;
+        const prev = root.barIslands[screenName];
+        if (!edge || !(extent > 0)) {
+            if (!prev)
+                return;
+            const gone = Object.assign({}, root.barIslands);
+            delete gone[screenName];
+            root.barIslands = gone;
+            return;
+        }
+        // Whole pixels: the pill's height follows widgets that animate, and every
+        // publish wakes each dock's sizing.
+        const e = Math.round(extent);
+        const r = Math.round(reserve);
+        if (prev && prev.edge === edge && prev.extent === e && prev.reserve === r)
+            return;
+        const next = Object.assign({}, root.barIslands);
+        next[screenName] = { "edge": edge, "extent": e, "reserve": r };
+        root.barIslands = next;
     }
 
     // The live docks, newest last: the Settings dock preview reads the first one's
@@ -1326,6 +1443,108 @@ Singleton {
         next[screenName] = rect;
         root.scrollingOverviewTargets = next;
     }
+    // Real Gnome overview: screen name -> the free area under the workspace
+    // thumbnails (screen coordinates), where the wallpaper plane lands.
+    property var realGnomeAreas: ({})
+    // The screen that last measured its own area (the one holding the search): the
+    // others derive theirs from it so every monitor's plane lands the same way.
+    property string realGnomeAreaScreen: ""
+    // Real Gnome opens on every monitor, not only the one under the pointer.
+    readonly property bool realGnomeMirrored: Quickshell.screens.length > 1
+        && (Config.options?.background?.overviewBackgroundStyle ?? "") === "real-gnome"
+        && Persistent.states.hyprland.layout !== "scrolling"
+        && !(Config.options?.background?.useBackgroundOverviewAlways ?? false)
+    function realGnomeAreaFor(screenName) {
+        const own = root.realGnomeAreas[screenName];
+        const source = root.realGnomeAreaScreen;
+        if (source === "" || source === screenName)
+            return own;
+        const sourceRect = root.realGnomeAreas[source];
+        const sourceScreen = Quickshell.screens.find(s => s.name === source);
+        const screen = Quickshell.screens.find(s => s.name === screenName);
+        if (!sourceRect || !sourceScreen || !screen)
+            return own;
+        const monitors = HyprlandData.monitors ?? [];
+        const sourceReserved = monitors.find(m => m.name === source)?.reserved ?? [0, 0, 0, 0];
+        const reserved = monitors.find(m => m.name === screenName)?.reserved ?? [0, 0, 0, 0];
+        const topInset = sourceRect.y - sourceReserved[1];
+        const bottomInset = (sourceScreen.height - sourceReserved[3]) - (sourceRect.y + sourceRect.height);
+        return Qt.rect(reserved[0], reserved[1] + topInset,
+            screen.width - reserved[0] - reserved[2],
+            screen.height - reserved[1] - reserved[3] - topInset - bottomInset);
+    }
+    function setRealGnomeArea(screenName, rect) {
+        root.realGnomeAreaScreen = screenName;
+        const current = root.realGnomeAreas[screenName];
+        if (current && Math.abs(current.x - rect.x) < 0.5 && Math.abs(current.y - rect.y) < 0.5
+                && Math.abs(current.width - rect.width) < 0.5 && Math.abs(current.height - rect.height) < 0.5)
+            return;
+        const next = Object.assign({}, root.realGnomeAreas);
+        next[screenName] = rect;
+        root.realGnomeAreas = next;
+        const stored = Persistent.states.overview?.realGnomeAreas?.[screenName];
+        if (!stored || Math.abs(stored.x - rect.x) >= 0.5 || Math.abs(stored.y - rect.y) >= 0.5
+                || Math.abs(stored.width - rect.width) >= 0.5 || Math.abs(stored.height - rect.height) >= 0.5) {
+            const saved = Object.assign({}, Persistent.states.overview.realGnomeAreas);
+            saved[screenName] = { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+            Persistent.states.overview.realGnomeAreas = saved;
+        }
+    }
+    // Real Gnome window picker: screen name -> [{ address, title, x, y, width, height }]
+    // of each window's slot at full open (screen coordinates), and the window
+    // the pointer is over, shared by the capture layer and the overview's input.
+    property var realGnomePickerSlots: ({})
+    function setRealGnomePickerSlots(screenName, slots) {
+        const next = Object.assign({}, root.realGnomePickerSlots);
+        next[screenName] = slots;
+        root.realGnomePickerSlots = next;
+    }
+    property string realGnomeHoveredWindow: ""
+    // Real Gnome workspace slide: the plane's wallpaper exactly as the background draws
+    // it (screen name -> { source, x, y, width, height, decodeWidth, decodeHeight, mipmap },
+    // unscaled screen coordinates), so the strip's cards paint the same pixels; and the
+    // screen whose plane steps aside while the cards carry the whole strip.
+    property var realGnomePlaneWallpapers: ({})
+    function setRealGnomePlaneWallpaper(screenName, value) {
+        const current = root.realGnomePlaneWallpapers[screenName];
+        if (current && JSON.stringify(current) === JSON.stringify(value))
+            return;
+        const next = Object.assign({}, root.realGnomePlaneWallpapers);
+        next[screenName] = value;
+        root.realGnomePlaneWallpapers = next;
+    }
+    // Screens whose plane is hidden while the strip's cards carry the workspaces.
+    property var realGnomePlaneHiddenScreens: ({})
+    function setRealGnomePlaneHidden(screenName, hidden) {
+        if (Boolean(root.realGnomePlaneHiddenScreens[screenName]) === hidden)
+            return;
+        const next = Object.assign({}, root.realGnomePlaneHiddenScreens);
+        if (hidden)
+            next[screenName] = true;
+        else
+            delete next[screenName];
+        root.realGnomePlaneHiddenScreens = next;
+    }
+    // Real Gnome window drag. The held window (hidden at its slot), the screen it is
+    // being dragged over, how many workspaces that screen's strip is previewed away
+    // from its active one (a real switch would end the drag, so it only happens on
+    // drop), and the workspace a drop is switching to, so the strip lands there
+    // without sliding again. The proxy is drawn by every monitor's picker from one
+    // rect in global (layout) coordinates.
+    property string realGnomeDraggedWindow: ""
+    property string realGnomePressedWindow: ""
+    // "", "drag" (held), "return" (springing back to its slot) or "drop" (landed elsewhere).
+    property string realGnomeDragPhase: ""
+    property string realGnomeDragTargetScreen: ""
+    property int realGnomeDragShift: 0
+    property int realGnomeDragCommitWs: 0
+    property string realGnomeDragCommitScreen: ""
+    property rect realGnomeDragRect: Qt.rect(0, 0, 0, 0)
+    property real realGnomeDragOpacity: 1.0
+    property real realGnomeDragScale: 1.0
+    // Gnome-like overviews: the focused monitor's zoom waits at 0 until the window
+    // captures have a frame and Hyprland has hidden the real windows under them.
+    property bool overviewZoomHeld: false
     // Search panels are lazy and may be hosted on any monitor. Keep a small
     // transient intent here so callers do not need to know which SearchWidget
     // instance will render it.
@@ -1406,23 +1625,12 @@ Singleton {
 
     // Media Popup placement (transient, non-persistent)
     property rect mediaPopupRect: Qt.rect(0, 0, 0, 0)
+    // Raw hover of the bar media widget. MediaControls owns the open debounce
+    // and the close grace, exactly as StyledPopup does for the other popups.
     property bool mediaWidgetHovered: false
-    property Timer mediaWidgetHoverTimer: Timer {
-        id: mediaWidgetHoverTimer
-        interval: 400
-        repeat: false
-        onTriggered: {
-            root.mediaWidgetHovered = false;
-        }
-    }
 
     function setMediaWidgetHovered(hovered) {
-        if (hovered) {
-            mediaWidgetHoverTimer.stop();
-            root.mediaWidgetHovered = true;
-        } else {
-            mediaWidgetHoverTimer.restart();
-        }
+        root.mediaWidgetHovered = hovered;
     }
 
     // Color Picker Popup
@@ -1943,10 +2151,11 @@ Singleton {
 
     readonly property bool connectModeActive: ShellModePolicy.connectModeActive
 
-    // In Float mode (cornerStyle 1), sidebars remain as separate PanelWindows
+    // With a horizontal Float bar (cornerStyle 1), sidebars remain as separate PanelWindows
     // rather than being embedded in the TopLayer. Only search/OSD are integrated.
+    // A vertical Float bar embeds them as floating cards that fuse with the bar.
     readonly property bool connectSidebarsSeparate: {
-        return connectModeActive && Config.options.bar.cornerStyle === 1;
+        return connectModeActive && Config.options.bar.cornerStyle === 1 && !Config.options.bar.vertical;
     }
 
     readonly property bool searchCenterMode: {

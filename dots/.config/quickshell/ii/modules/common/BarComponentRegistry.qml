@@ -72,6 +72,11 @@ Singleton {
                     displayName: qsTr("Neural"),
                     icon: "neurology",
                     value: "neural"
+                },
+                {
+                    displayName: qsTr("Sculpt"),
+                    icon: "shapes",
+                    value: "sculpt"
                 }
             ],
             configPage: "SearchBarWidgetConfig.qml"
@@ -141,6 +146,11 @@ Singleton {
                     displayName: qsTr("Index"),
                     icon: "format_list_numbered",
                     value: "index"
+                },
+                {
+                    displayName: qsTr("Pills"),
+                    icon: "view_week",
+                    value: "pills"
                 }
             ]
         },
@@ -149,7 +159,23 @@ Singleton {
             icon: "monitor_heart",
             title: "System monitor",
             styleConfigKey: "resources",
-            styleOptions: defaultStyleOptions,
+            styleOptions: [
+                {
+                    displayName: qsTr("Default"),
+                    icon: "style",
+                    value: "default"
+                },
+                {
+                    displayName: qsTr("Expressive"),
+                    icon: "fluid_med",
+                    value: "expressive"
+                },
+                {
+                    displayName: qsTr("Sculpt"),
+                    icon: "shapes",
+                    value: "sculpt"
+                }
+            ],
             configPage: "SystemMonitorConfig.qml"
         },
         {
@@ -173,6 +199,14 @@ Singleton {
             styleConfigKey: "portWatcher",
             styleOptions: defaultStyleOptions,
             configPage: "PortWatcherConfig.qml"
+        },
+        {
+            id: "network_speed",
+            icon: "speed",
+            title: "Network speed",
+            styleConfigKey: "networkSpeed",
+            styleOptions: defaultStyleOptions,
+            configPage: "NetworkSpeedConfig.qml"
         },
         {
             id: "clock",
@@ -236,6 +270,11 @@ Singleton {
                     displayName: qsTr("Orbs"),
                     icon: "workspaces",
                     value: "orbs"
+                },
+                {
+                    displayName: qsTr("Sculpt"),
+                    icon: "shapes",
+                    value: "sculpt"
                 }
             ],
             configPage: "DashboardButtonConfig.qml"
@@ -353,7 +392,23 @@ Singleton {
             icon: "timer",
             title: "Timer & Pomodoro",
             styleConfigKey: "timer",
-            styleOptions: defaultStyleOptions,
+            styleOptions: [
+                {
+                    displayName: qsTr("Default"),
+                    icon: "style",
+                    value: "default"
+                },
+                {
+                    displayName: qsTr("Expressive"),
+                    icon: "fluid_med",
+                    value: "expressive"
+                },
+                {
+                    displayName: qsTr("Sculpt"),
+                    icon: "shapes",
+                    value: "sculpt"
+                }
+            ],
             configPage: "IndicatorsConfig.qml"
         },
         {
@@ -381,6 +436,11 @@ Singleton {
                     displayName: qsTr("Tessera"),
                     icon: "view_module",
                     value: "tessera"
+                },
+                {
+                    displayName: qsTr("Sculpt"),
+                    icon: "shapes",
+                    value: "sculpt"
                 }
             ],
             configPage: "WeatherBarWidgetConfig.qml"
@@ -405,6 +465,11 @@ Singleton {
                     displayName: qsTr("Segments"),
                     icon: "view_week",
                     value: "segments"
+                },
+                {
+                    displayName: qsTr("Sculpt"),
+                    icon: "shapes",
+                    value: "sculpt"
                 }
             ],
             configPage: "UtilButtonsConfig.qml"
@@ -414,7 +479,23 @@ Singleton {
             icon: "bluetooth_connected",
             title: "Bluetooth Devices",
             styleConfigKey: "bluetooth",
-            styleOptions: defaultStyleOptions,
+            styleOptions: [
+                {
+                    displayName: qsTr("Default"),
+                    icon: "style",
+                    value: "default"
+                },
+                {
+                    displayName: qsTr("Expressive"),
+                    icon: "fluid_med",
+                    value: "expressive"
+                },
+                {
+                    displayName: qsTr("Sculpt"),
+                    icon: "shapes",
+                    value: "sculpt"
+                }
+            ],
             configPage: "BluetoothConfig.qml"
         },
         {
@@ -438,6 +519,11 @@ Singleton {
                     displayName: qsTr("Expressive"),
                     icon: "fluid_med",
                     value: "expressive"
+                },
+                {
+                    displayName: qsTr("Sculpt"),
+                    icon: "shapes",
+                    value: "sculpt"
                 }
             ]
         },

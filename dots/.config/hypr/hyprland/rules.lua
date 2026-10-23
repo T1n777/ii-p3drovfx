@@ -3,8 +3,6 @@
 -- Disable blur for xwayland context menus
 hl.window_rule({match = {class = "^()$", title = "^()$" },                   no_blur = true })
 
--- Disable blur for every window except transparent apps
-hl.window_rule({match = {class = "^(?!(kitty|code|code-url-handler|vscodium|antigravity-ide)).*" }, no_blur = true })
 
 -- Floating
 -- Tablet Family shell tools are regular xdg toplevels, so they behave like apps on the
@@ -33,6 +31,8 @@ hl.window_rule({match = {title = "^(ii Usage)$" },                           flo
 hl.window_rule({match = {title = "^(ii Usage)$" },                           center = true})
 hl.window_rule({match = {title = "^(ii Modes)$" },                           float = true})
 hl.window_rule({match = {title = "^(ii Modes)$" },                           center = true})
+hl.window_rule({match = {title = "^(ii System Health)$" },                   float = true})
+hl.window_rule({match = {title = "^(ii System Health)$" },                   center = true})
 -- The throwaway mirror the shell opens only so a phone's lockscreen can be
 -- dismissed from here. It lives for a few seconds, so it must not be tiled
 -- into the current layout.
@@ -184,8 +184,10 @@ hl.layer_rule({ match = { namespace = "quickshell.*" }, ignore_alpha = 0.19})
 hl.layer_rule({ match = { namespace = "quickshell.*" }, xray = false})
 -- Background is a Bottom-layer wallpaper surface; compositor blur here causes double-blur
 hl.layer_rule({ match = { namespace = "quickshell:background" }, blur = false})
--- The widgets blur themselves when a window is open; compositor blur would frost a hard-edged patch around them
-hl.layer_rule({ match = { namespace = "quickshell:backgroundWidgets" }, blur = false})
+-- Off until the shell pushes its own per-screen rule (Appearance.backgroundWidgetsRules): on for
+-- see-through widgets, off on a screen whose widgets blur themselves under open windows
+-- (a hard-edged patch otherwise). One namespace per screen: quickshell:backgroundWidgets:<screen>
+hl.layer_rule({ match = { namespace = "quickshell:backgroundWidgets:.*" }, blur = false})
 hl.layer_rule({ match = { namespace = "quickshell:workspaceBlurOverlay" }, order = -1})
 hl.layer_rule({ match = { namespace = "quickshell:workspaceBlurOverlay" }, blur = true})
 hl.layer_rule({ match = { namespace = "quickshell:workspaceBlurOverlay" }, ignore_alpha = 0.0})
@@ -266,6 +268,10 @@ hl.layer_rule({ match = { namespace = "quickshell:tabletAppDrawer" }, blur = fal
 -- long as a drawing is on the workspace.
 hl.layer_rule({ match = { namespace = "quickshell:tabletLiveDraw" }, blur = false})
 hl.layer_rule({ match = { namespace = "quickshell:tabletLiveDraw" }, no_anim = true})
+-- The desktop's live draw, same reasoning; and above every other overlay (lower order is
+-- drawn on top), since annotating the screen means annotating the island and the OSK too.
+hl.layer_rule({ match = { namespace = "quickshell:liveDraw" }, blur = false})
+hl.layer_rule({ match = { namespace = "quickshell:liveDraw" }, no_anim = true, order = -5})
 hl.layer_rule({ match = { namespace = "quickshell:verticalBar" }, animation = "slide", order = 5})
 hl.layer_rule({ match = { namespace = "quickshell:osk" }, order = -1})
 -- Quickshell: waffles

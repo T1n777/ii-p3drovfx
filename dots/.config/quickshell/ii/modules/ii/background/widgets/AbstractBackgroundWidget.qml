@@ -33,6 +33,14 @@ AbstractWidget {
     }
     readonly property bool interactionLocked: pinned || (_positionsLocked && !editModeActive)
     property bool isPreview: false
+    /**
+     * Set by the host while windows cover the desktop. Widgets must not keep the layer
+     * busy then: it is full screen, so any repeating Timer, seconds SystemClock, endless
+     * animation or FrameAnimation re-renders every widget on every frame.
+     * Gate each of those on `live` (tests/check-widget-live.sh enforces it).
+     */
+    property bool paused: false
+    readonly property bool live: !root.paused && root.visible && root.opacity > 0
     property string styleOverride: widgetInstance ? (WidgetsRegistry.getStyleOverride(widgetInstance.widgetId) || "") : ""
 
     property int screenWidth: 1920
@@ -82,6 +90,15 @@ AbstractWidget {
     }
 
     readonly property real effectiveScale: Math.max(0.001, root.scale)
+
+    // This instance's own picture (photo widgets, Config.updateWidgetImagePath),
+    // or undefined while it has none of its own and shows its type's.
+    readonly property var instanceImagePath: {
+        if (!root.widgetInstance)
+            return undefined;
+        const entry = WidgetPlacement.findEntry(Config.options.background.activeWidgets, root.widgetInstance.id);
+        return entry && entry.imagePath !== undefined ? String(entry.imagePath) : undefined;
+    }
 
     // ── Supersampling factor ─────────────────────────────────────────────────
     // Item.scale stretches content that has already been rasterised, so anything
@@ -477,12 +494,19 @@ AbstractWidget {
     // everyone else uses the per-instance Item scale.
     readonly property var _widgetSizeConsumers: ({
         "android_search_bar": true, "at_a_glance": true,
+        "todo_focus": true, "todo_board": true, "todo_column": true, "timer_pomodoro": true, "timer_stopwatch": true, "timer_countdown": true, "translator_widget": true, "water_glass": true, "phone_key": true, "phone_deck": true, "phone_tower": true, "send_drop": true, "session_grid": true,
+        "calendar_date_banner": true, "calendar_date_shapes": true, "calendar_date_stack": true,
+        "calendar_date_type": true,
+        "calendar_month_tall": true, "calendar_week_agenda": true, "calendar_week_strip": true,
         "circle_pointer_clock": true, "circular_media": true,
         "clock_expressive_card": true, "clock_flex": true,
-        "clock_hori": true, "compact_media": true, "concentric_clock": true,
-        "grid_card_clock": true, "media_cd": true, "month_clock": true,
-        "photo_1x1": true, "resource_cpu_pill": true, "resource_disk_pill": true,
-        "resource_fill_cards": true, "resource_nothing_cpu": true,
+        "clock_duo": true, "clock_hori": true, "clock_numeral": true, "clock_type_stack": true, "clock_type_weight": true,
+        "clock_type_width": true, "compact_media": true, "concentric_clock": true,
+        "grid_card_clock": true, "media_cd": true, "media_cover": true, "media_deck": true,
+        "media_halo": true, "media_poster": true, "month_clock": true,
+        "photo_1x1": true, "photo_plain_1x1": true, "photo_plain_1x2": true,
+        "photo_plain_2x1": true, "resource_cpu_pill": true, "resource_disk_pill": true,
+        "resource_columns": true, "resource_fill_cards": true, "resource_tiles": true, "resource_nothing_cpu": true,
         "resource_nothing_disk": true, "resource_nothing_ram": true,
         "resource_ram_pill": true, "scallop_dot_clock": true,
         "scallop_number_clock": true, "search_pill": true,
@@ -1508,70 +1532,16 @@ AbstractWidget {
     }
 
     // ── Resize grip ──────────────────────────────────────────────────────────
-    Item {
+    // Shared with the launch-pad cards (ResizeGrip.qml).
+    ResizeGrip {
         id: resizeHandle
-        visible: opacity > 0.001
-        // Shown on hover, and throughout the mode: a grip you have to find
-        // by hovering is not an affordance in a layout editor.
-        opacity: root._scaleHandleAvailable && !root.isDragging && (root.containsMouse || resizeDragArea.dragging || root.editModeActive) ? 1 : 0
-        // Grow into place instead of only fading: at this size a pure opacity
-        // ramp reads as a glitch rather than as something arriving.
-        scale: opacity > 0.5 ? 1 : 0.7
-        Behavior on opacity {
-            animation: Appearance.animation.elementMoveFast.numberAnimation.createObject(resizeHandle)
-        }
-        Behavior on scale {
-            animation: Appearance.animation.elementMoveEnter.numberAnimation.createObject(resizeHandle)
-        }
-        anchors.right: parent.right
-        anchors.bottom: parent.bottom
-        // The visual grip sits inside the bounds; the hit area around it is
-        // allowed to hang off the corner, which is what makes it grabbable.
-        anchors.rightMargin: -6
-        anchors.bottomMargin: -6
-        width: 40
-        height: 40
-        z: 99
-
-        Rectangle {
-            id: grip
-            anchors.centerIn: parent
-            anchors.horizontalCenterOffset: -3
-            anchors.verticalCenterOffset: -3
-            width: 22
-            height: 22
-            radius: 7
-            color: resizeDragArea.dragging || resizeDragArea.containsMouse
-                ? Appearance.colors.colPrimary
-                : Appearance.colors.colSecondaryContainer
-
-            Behavior on color {
-                animation: Appearance.animation.elementMoveFast.colorAnimation.createObject(grip)
-            }
-
-            MaterialSymbol {
-                anchors.centerIn: parent
-                text: "open_in_full"
-                iconSize: 13
-                color: resizeDragArea.dragging || resizeDragArea.containsMouse
-                    ? Appearance.colors.colOnPrimary
-                    : Appearance.colors.colOnSecondaryContainer
-            }
-        }
-
-        MouseArea {
-            id: resizeDragArea
-            anchors.fill: parent
-            hoverEnabled: true
-            cursorShape: Qt.SizeFDiagCursor
-            preventStealing: true
-
-            onPressed: mouse => root.beginResizeGesture(mouse)
-            onPositionChanged: mouse => root.updateResizeGesture(mouse)
-            onReleased: root.endResizeGesture()
-            onCanceled: root.endResizeGesture()
-            onDoubleClicked: root.resetScaleFromHandle()
-        }
+        shown: root._scaleHandleAvailable && !root.isDragging && (root.containsMouse || root.editModeActive)
+        renderScale: root.renderScale
+        onPressed: mouse => root.beginResizeGesture(mouse)
+        onPositionChanged: mouse => root.updateResizeGesture(mouse)
+        onReleased: root.endResizeGesture()
+        onCanceled: root.endResizeGesture()
+        onDoubleClicked: root.resetScaleFromHandle()
     }
 
     // ── Menu grip ────────────────────────────────────────────────────────────
@@ -1618,10 +1588,14 @@ AbstractWidget {
                 animation: Appearance.animation.elementMoveFast.colorAnimation.createObject(menuGrip)
             }
 
+            // Rasterised at the size it is shown at: the glyph is a native-
+            // rendered bitmap, and the widget's own scale only stretched it.
             MaterialSymbol {
                 anchors.centerIn: parent
                 text: "more_horiz"
-                iconSize: 15
+                iconSize: 15 * root.renderScale
+                scale: 1 / root.renderScale
+                font.variableAxes: ({ "FILL": 0, "wght": 400, "opsz": 20 })
                 color: menuDragArea.containsMouse
                     ? Appearance.colors.colOnPrimary
                     : Appearance.colors.colOnSecondaryContainer

@@ -258,6 +258,8 @@ Singleton {
                 // Ctrl+letter result keybinds: { letter, key, name, type,
                 // iconName, iconType, filePath, query }. See LauncherSearch.
                 property list<var> resultKeybinds: []
+                // Dictionary lookups the user stayed on: "lang|word", newest first.
+                property list<string> dictionaryHistory: []
             }
 
             // Typing test scores. Only aggregate metrics are kept — never the
@@ -355,6 +357,10 @@ Singleton {
                 property list<string> recentWallpapers: []
                 // Preset names, most recently applied first (PresetStore.applyPreset).
                 property list<string> recentPresets: []
+                // How Edit Mode's Style catalogue orders the presets:
+                // "recent", "name" or "newest", and whether it is reversed.
+                property string presetSort: "recent"
+                property bool presetSortReversed: false
                 property JsonObject mediaMode: JsonObject {
                     property real userScrollOffset: 0
                     property real localMediaVolume: 0.8
@@ -390,6 +396,14 @@ Singleton {
             }
             property JsonObject modesApp: JsonObject {
                 property bool railExpanded: true
+            }
+            property JsonObject healthApp: JsonObject {
+                property string tab: "overview"
+                property bool railExpanded: true
+                /// The crash-dump access offer was answered after an in-app build.
+                property bool dumpAccessAsked: false
+                /// The recommended pacman hook offer was answered.
+                property bool qtHookAsked: false
             }
             property JsonObject notes: JsonObject {
                 property real width: 1500
@@ -540,6 +554,13 @@ Singleton {
                 property string layout: "dwindle"
             }
 
+            property JsonObject overview: JsonObject {
+                // Real Gnome: screen name -> { x, y, width, height } of the free area
+                // under the workspace thumbnails, last measured. The first open after a
+                // start lands the plane there instead of on an estimate.
+                property var realGnomeAreas: ({})
+            }
+
             property JsonObject idle: JsonObject {
                 property bool inhibit: false
                 property real expiresAt: 0 // Epoch ms; 0 means indefinite. Must be real, not int
@@ -591,6 +612,8 @@ Singleton {
                 property list<string> open: ["crosshair", "recorder", "media", "volumeMixer", "resources"]
                 property JsonObject crosshair: JsonObject {
                     property bool pinned: false
+                    // Pinned by the auto pin, which only takes back its own pins
+                    property bool autoPinned: false
                     property bool clickthrough: true
                     property real x: 827
                     property real y: 441
@@ -658,6 +681,8 @@ Singleton {
                 }
                 property JsonObject discordVoice: JsonObject {
                     property bool pinned: false
+                    // Pinned by the auto pin, which only takes back its own pins
+                    property bool autoPinned: false
                     property bool clickthrough: false
                     property real x: 80
                     property real y: 600
@@ -666,6 +691,8 @@ Singleton {
                 }
                 property JsonObject perfMonitor: JsonObject {
                     property bool pinned: true
+                    // Pinned by the auto pin, which only takes back its own pins
+                    property bool autoPinned: false
                     property bool clickthrough: true
                     property real x: 24
                     property real y: 80
@@ -757,6 +784,10 @@ Singleton {
                 property string windDownNotified: ""
                 property string bedtimeNotified: ""
                 property real lastNudge: 0
+                // Intrusive mode: snoozes taken tonight, keyed like the reminders (night@target).
+                property string intrusiveMark: ""
+                property int snoozeCount: 0
+                property real snoozedUntil: 0
             }
             // Screen-time limits: today's ignores, extra time and sent warnings, as
             // one JSON document so the day can be reset in a single write.

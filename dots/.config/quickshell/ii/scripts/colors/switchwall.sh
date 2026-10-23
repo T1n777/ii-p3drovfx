@@ -60,6 +60,19 @@ report_matugen_failure() {
     fi
 }
 
+# Rebuild the recolored icon theme without holding up the rest of the theming. The recolor
+# runs at idle priority, debounces and drops superseded runs itself, so a burst of wallpaper
+# changes ends in one rebuild that never takes CPU from the desktop. It is detached from this
+# script's process group so the caller finishing (or being killed) does not stop it.
+recolor_icons_in_background() {
+    local script="$HOME/.config/quickshell/ii/scripts/colors/recolor_icons.py"
+    if command -v setsid >/dev/null 2>&1; then
+        setsid -f python3 "$script" >/dev/null 2>&1 </dev/null
+    else
+        nohup python3 "$script" >/dev/null 2>&1 </dev/null &
+    fi
+}
+
 handle_kde_material_you_colors() {
     # Check if Qt app theming is enabled in config
     if [ -f "$SHELL_CONFIG_FILE" ]; then
@@ -787,7 +800,12 @@ done"
             generate_colors_material_args=(--path "$imgpath")
             # Update wallpaper path in config
             if [[ -z "$colors_only_flag" && -z "$noswitch_flag" ]]; then
-                set_wallpaper_path "$imgpath" "${lockscreen_flag:+lockscreen}"
+                # A light-mode pick only stores its own path; the dark wallpaper stays in wallpaperPath
+                if [[ -n "$lightmode_flag" ]]; then
+                    set_wallpaper_path "$imgpath" "lightmode"
+                else
+                    set_wallpaper_path "$imgpath" "${lockscreen_flag:+lockscreen}"
+                fi
             fi
             if is_desktop_target && [[ "$colors_only_flag" != "1" && "$noswitch_flag" != "1" ]]; then
                 remove_restore
@@ -856,7 +874,7 @@ done"
         rm -f "$STATE_DIR/matugen_error_notified"
         apply_color_overrides_flat "$mode_flag"
         echo "[switchwall.sh] Applied theme: $type_flag"
-        if [[ -z "$colors_only_flag" && "$(jq -r '.appearance.icons.enableThemed' "$SHELL_CONFIG_FILE" 2>/dev/null)" == "true" ]]; then python3 "$HOME/.config/quickshell/ii/scripts/colors/recolor_icons.py"; fi
+        if [[ -z "$colors_only_flag" && "$(jq -r '.appearance.icons.enableThemed' "$SHELL_CONFIG_FILE" 2>/dev/null)" == "true" ]]; then recolor_icons_in_background; fi
         "$SCRIPT_DIR"/applycolor.sh
     else
         matugen_exit_code=0
@@ -893,7 +911,7 @@ done"
             # The boost rewrites the surfaces; a picked surface still wins.
             apply_color_overrides_flat "$mode_flag"
         fi
-        if [[ -z "$colors_only_flag" && "$(jq -r '.appearance.icons.enableThemed' "$SHELL_CONFIG_FILE" 2>/dev/null)" == "true" ]]; then python3 "$HOME/.config/quickshell/ii/scripts/colors/recolor_icons.py"; fi
+        if [[ -z "$colors_only_flag" && "$(jq -r '.appearance.icons.enableThemed' "$SHELL_CONFIG_FILE" 2>/dev/null)" == "true" ]]; then recolor_icons_in_background; fi
         source "$(eval echo $ILLOGICAL_IMPULSE_VIRTUAL_ENV)/bin/activate"
         preview_args=()
         if [[ -z "$colors_only_flag" ]]; then
@@ -1178,7 +1196,16 @@ main() {
         fi
     fi
 
-    # Resolve light theme variant when mode is light
+    # Resolve light theme variant when mode is light. Without --mode the mode
+    # is only read in switch(), after the dark file was already picked.
+    if [[ -n "$theme_file" && -z "$mode_flag" ]]; then
+        current_mode=$(gsettings get org.gnome.desktop.interface color-scheme 2>/dev/null | tr -d "'")
+        if [[ "$current_mode" == "prefer-dark" ]]; then
+            mode_flag="dark"
+        else
+            mode_flag="light"
+        fi
+    fi
     if [[ -n "$theme_file" && "$mode_flag" == "light" ]]; then
         local light_theme_file="${theme_file%.json}_light.json"
         if [[ -f "$light_theme_file" ]]; then

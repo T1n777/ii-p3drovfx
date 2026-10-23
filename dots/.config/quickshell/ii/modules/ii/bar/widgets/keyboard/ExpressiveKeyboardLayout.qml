@@ -21,6 +21,10 @@ MouseArea {
     
     hoverEnabled: !BarInteraction.clickToShow
 
+    // Click-to-show gives the left click to the popup; cycling moves to the right button.
+    readonly property bool rightClickCycles: BarInteraction.cycleOnRightClick
+    acceptedButtons: rightClickCycles ? (Qt.LeftButton | Qt.RightButton) : Qt.LeftButton
+
     function abbreviateLayoutCode(fullCode) {
         if (!fullCode) return "";
         const firstLayout = fullCode.split(':')[0].split('-')[0];
@@ -33,7 +37,9 @@ MouseArea {
         command: ["bash", "-c", "hyprctl switchxkblayout all next"]
     }
 
-    onClicked: {
+    onClicked: mouse => {
+        if (mouse.button !== (rightClickCycles ? Qt.RightButton : Qt.LeftButton))
+            return;
         if (hasMultipleLayouts) {
             switchProc.running = false;
             switchProc.running = true;
@@ -47,7 +53,7 @@ MouseArea {
 
     Rectangle {
         anchors.fill: parent
-        radius: Config.options.bar.barGroupStyle === 1 ? Appearance.rounding.windowRounding : Appearance.rounding.full
+        radius: (typeof rootItem !== "undefined" ? rootItem.groupStyle : Config.options.bar.barGroupStyle) === 1 ? Appearance.rounding.windowRounding : Appearance.rounding.full
         color: "transparent"
         border.width: 1
         border.color: root.containsMouse ? widgetPalette.colBackgroundHover : widgetPalette.colBackground

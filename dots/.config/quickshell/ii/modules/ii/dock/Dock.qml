@@ -17,7 +17,9 @@ pragma ComponentBehavior: Bound
 Scope {
     id: dock
 
-    property bool pinned: Config.options?.dock.pinnedOnStartup ?? false
+    // The pin button writes the same option the "Pinned on startup" switches show, so the
+    // last state survives a shell or machine restart.
+    readonly property bool pinned: Config.options?.dock.pinnedOnStartup ?? false
 
     readonly property string dockEffectivePosition: {
         const pos = Config.options?.dock.position ?? "bottom"
@@ -101,7 +103,10 @@ Scope {
             // Main-axis room the tray keeps from the window edge for its shadow.
             mainEdgePad: isDynamic ? 0 : mainPad / 2,
             backgroundWidth: bgW,
-            backgroundHeight: bgH
+            backgroundHeight: bgH,
+            // The longest the visible tray can get on its main axis: content
+            // beyond it is clipped, so the dock folds apps to stay inside.
+            trayMainCap: opts.isVertical ? (flushMainH ? maxH : trayCapH) : (flushMainW ? maxW : trayCapW)
         }
     }
 
@@ -140,10 +145,19 @@ Scope {
             // computed from this - a binding loop on implicitWidth/sizing.
             property real _windowW: 0
             property real _windowH: 0
+            property real _naturalW: 0
+            property real _naturalH: 0
             // Deferred: before the configure the size follows implicitWidth
             // synchronously, inside the very evaluation that produced it.
-            onWidthChanged: Qt.callLater(() => dockRoot._windowW = dockRoot.width)
-            onHeightChanged: Qt.callLater(() => dockRoot._windowH = dockRoot.height)
+            onWidthChanged: Qt.callLater(() => {
+                dockRoot._windowW = dockRoot.width;
+                // What the compositor gave before our own negative margin widened it.
+                dockRoot._naturalW = dockRoot.width - Math.round(dockRoot.islandReclaim);
+            })
+            onHeightChanged: Qt.callLater(() => {
+                dockRoot._windowH = dockRoot.height;
+                dockRoot._naturalH = dockRoot.height - Math.round(dockRoot.islandReclaim);
+            })
             readonly property bool mainAxisFromWindow: dock.isVertical ? dockRoot._windowH > 1 : dockRoot._windowW > 1
             readonly property real availableW: (!dock.isVertical && dockRoot._windowW > 1) ? dockRoot._windowW : (screen?.width ?? 1920)
             readonly property real availableH: (dock.isVertical && dockRoot._windowH > 1) ? dockRoot._windowH : (screen?.height ?? 1080)
@@ -176,18 +190,124 @@ Scope {
                 readonly property string screenName: dockRoot.screen ? dockRoot.screen.name : ""
                 readonly property string side: dock.dockEffectivePosition
                 readonly property real thickness: dockRoot.unmagnifiedThickness
+                readonly property real reserved: dockRoot.exclusiveZone
+                readonly property real shown: (dockRoot.isFullWidth && dockRoot.reveal) ? dockRoot.unmagnifiedThickness : 0
+                readonly property real concave: dockRoot.isFullWidthConcave ? dockRoot.concaveCornerRadius : 0
 
                 function publish() {
-                    GlobalStates.setDockInset(editInsetPublisher.screenName, editInsetPublisher.side, editInsetPublisher.thickness);
+                    GlobalStates.setDockInset(editInsetPublisher.screenName, editInsetPublisher.side, editInsetPublisher.thickness, editInsetPublisher.reserved, editInsetPublisher.shown, editInsetPublisher.concave);
                 }
 
                 onSideChanged: publish()
                 onThicknessChanged: publish()
+                onReservedChanged: publish()
+                onShownChanged: publish()
+                onConcaveChanged: publish()
                 Component.onCompleted: publish()
                 Component.onDestruction: GlobalStates.setDockInset(editInsetPublisher.screenName, "", 0)
             }
 
             readonly property bool anySidebarOpen: GlobalStates.effectiveLeftOpen || GlobalStates.effectiveRightOpen
+
+            // Connect mode draws the sidebars inside the top layer, which ignores every
+            // exclusive zone: a pinned vertical dock on the sidebar's edge would sit under
+            // it. It rides along instead, the way the connected vertical bar does. Separate
+            // sidebars (default, Float+Connect) are their own surfaces and sit beside it.
+            readonly property bool sidebarPushes: dock.pinned && dock.isVertical
+                && GlobalStates.connectModeActive && !GlobalStates.connectSidebarsSeparate
+            readonly property bool pushSideIsLeft: dock.dockEffectivePosition === "left"
+            readonly property bool pushSideOnScreen: (dockRoot.screen?.name ?? "")
+                === (pushSideIsLeft ? GlobalStates.effectiveLeftMonitor : GlobalStates.effectiveRightMonitor)
+            readonly property real pushTarget: (sidebarPushes && pushSideOnScreen)
+                ? (pushSideIsLeft ? GlobalStates.leftSidebarTargetWidth : GlobalStates.rightSidebarTargetWidth) : 0
+            readonly property real sidebarPush: (sidebarPushes && pushSideOnScreen)
+                ? Math.round(pushSideIsLeft ? GlobalStates.animatedLeftSidebarWidth : GlobalStates.animatedRightSidebarWidth) : 0
+            readonly property bool sidebarPushing: pushTarget > 0 || sidebarPush > 0
+            // The window keeps room for the widest sidebar all along, transparent and outside
+            // the input mask: Hyprland animates a layer's geometry, so a window that grew as
+            // the slide began (and shrank as it ended) dragged the dock through a second slide
+            // of its own. Neither pinning nor the monitor the sidebar follows changes it.
+            readonly property real pushRoom: (dock.isVertical && GlobalStates.connectModeActive && !GlobalStates.connectSidebarsSeparate)
+                ? Math.max(Appearance.sizes.sidebarWidthExtended, GlobalStates.dashboardWidth, GlobalStates.policiesWidth) : 0
+            onSidebarPushingChanged: if (sidebarPushing) HyprlandData.updateLayers()
+
+            // Two layer surfaces never present in step, so while the push moves the dock
+            // is drawn by the top layer from a snapshot (GlobalStates.dockPushCopies) and
+            // the real one waits out of sight, then takes over again at rest.
+            readonly property bool pushMoving: sidebarPushing && sidebarPush !== Math.round(pushTarget)
+            readonly property string pushScreenName: dockRoot.screen?.name ?? ""
+            readonly property bool pushCopyCovering: pushMoving && !!GlobalStates.dockPushCopyShown[pushScreenName]
+            property int pushCopyGeneration: 0
+            property bool pushCopyReleasing: false
+
+            // Where this dock's window really is, in screen coordinates.
+            function layerRect() {
+                const name = dockRoot.pushScreenName;
+                const levels = HyprlandData.layers?.[name]?.levels ?? {};
+                const monitor = (HyprlandData.monitors ?? []).find(m => m?.name === name);
+                if (!monitor)
+                    return null;
+                for (const level of Object.keys(levels))
+                    for (const surface of Array.from(levels[level] ?? []))
+                        if (surface?.namespace === "quickshell:dock")
+                            return { "x": surface.x - monitor.x, "y": surface.y - monitor.y, "w": surface.w, "h": surface.h };
+                return null;
+            }
+
+            onPushMovingChanged: {
+                if (pushMoving) {
+                    pushCopyReleasing = false;
+                    if (GlobalStates.dockPushCopies[pushScreenName])
+                        return;
+                    const generation = ++pushCopyGeneration;
+                    const dpr = dockMouseArea.Screen.devicePixelRatio || 1;
+                    dockMouseArea.grabToImage(result => {
+                        if (generation !== dockRoot.pushCopyGeneration || !dockRoot.pushMoving)
+                            return;
+                        const rect = dockRoot.layerRect();
+                        if (!rect)
+                            return;
+                        const screenW = dockRoot.screen?.width ?? 1920;
+                        const onLeft = dockRoot.pushSideIsLeft;
+                        // The gap between the screen edge and the dock's outer edge with no push.
+                        const edge = onLeft ? rect.x : screenW - (rect.x + rect.w);
+                        const inner = onLeft
+                            ? dockMouseArea.x - dockRoot.sidebarPush
+                            : dockRoot.width - dockMouseArea.x - dockMouseArea.width - dockRoot.sidebarPush;
+                        dockRoot.pushCopyResult = result;
+                        GlobalStates.setDockPushCopy(dockRoot.pushScreenName, {
+                            "url": String(result.url),
+                            "side": onLeft ? "left" : "right",
+                            "inset": edge + inner,
+                            "y": rect.y + dockMouseArea.y,
+                            "width": dockMouseArea.width,
+                            "height": dockMouseArea.height
+                        });
+                    }, Qt.size(Math.ceil(dockMouseArea.width * dpr), Math.ceil(dockMouseArea.height * dpr)));
+                } else if (GlobalStates.dockPushCopies[pushScreenName]) {
+                    // At rest the real dock shows first; the copy goes once that frame is out.
+                    pushCopyReleasing = true;
+                } else {
+                    ++pushCopyGeneration;
+                }
+            }
+            // Keeps the snapshot's url alive while the top layer draws it.
+            property var pushCopyResult: null
+
+            Connections {
+                target: dockRoot.pushCopyReleasing ? dockMouseArea.Window.window : null
+                property int framesOut: 0
+                function onFrameSwapped() {
+                    if (++framesOut < 2)
+                        return;
+                    framesOut = 0;
+                    dockRoot.pushCopyReleasing = false;
+                    GlobalStates.setDockPushCopy(dockRoot.pushScreenName, null);
+                    dockRoot.pushCopyResult = null;
+                }
+            }
+            Component.onDestruction: GlobalStates.setDockPushCopy(dockRoot.pushScreenName, null)
+
 
             readonly property bool isSpecialWorkspaceOpen: {
                 if (!dockRoot.screen) return false;
@@ -220,7 +340,15 @@ Scope {
             // dock is doing, and stage 6 edits the dock in place. A preset switch takes it off
             // screen with the bar: the preset may move it to another edge, and it would make that
             // move in full view while the shell is busy applying the rest.
-            property bool reveal: !GlobalStates.presetBarHidden && (dock.pinned || GlobalStates.editMode || DockPresets.isSwitchingPreset || (!anySidebarOpen && ((dockRoot.effectiveHoverToReveal && dockMouseArea.containsMouse) || (dockContent.requestDockShow) || (workspaceEmpty && !isSpecialWorkspaceOpen && (!(Config.options?.dock.showOnlyOnFocusedMonitor ?? false) || isFocusedMonitor)))))
+            // Real Gnome's overview puts a workspace plane where the dock sits; on an
+            // empty workspace the dock would cover its bottom, so it steps aside.
+            readonly property var overviewController: GlobalStates.overviewBackgroundControllerFor(dockRoot.screen?.name ?? "")
+            readonly property bool realGnomeOverviewOpen: GlobalStates.overviewOpen && !GlobalStates.editMode
+                && !!dockRoot.overviewController && dockRoot.overviewController.isRealGnome
+            // A fullscreen window takes the screen even from a pinned dock: it hides, holds no
+            // zone, and shows on hover like an unpinned one (when hover is allowed there).
+            readonly property bool pinnedShown: dock.pinned && !dockRoot.hasFullscreenWindow
+            property bool reveal: !GlobalStates.presetBarHidden && !dockRoot.realGnomeOverviewOpen && (dockRoot.pinnedShown || GlobalStates.editMode || DockPresets.isSwitchingPreset || (!anySidebarOpen && ((dockRoot.effectiveHoverToReveal && dockMouseArea.containsMouse) || (dockContent.requestDockShow) || (workspaceEmpty && !isSpecialWorkspaceOpen && (!(Config.options?.dock.showOnlyOnFocusedMonitor ?? false) || isFocusedMonitor)))))
             property bool positionChanging: false
 
             // TODO: check for multi-monitor situations
@@ -237,6 +365,15 @@ Scope {
             readonly property bool isDynamicIsland: dockContent.isDynamicIsland
             readonly property bool isHug: dockContent.isHug
             readonly property bool isTransparent: dockContent.isTransparent
+            // The top layer's band fills this edge in the frame's colour - for the full-width
+            // styles only; the others keep their own tray. A fullscreen window folds the
+            // frame away, band included, so the dock paints its own tray over it.
+            readonly property bool onFrameBand: !!GlobalStates.dockBandScreens[dockRoot.screen?.name ?? ""]
+                && !dockRoot.hasFullscreenWindow
+                && dockRoot.isFullWidth
+            // Its compositor blur follows: nothing of its own to blur on the band.
+            onOnFrameBandChanged: Appearance.dockOnFrameBand = dockRoot.onFrameBand
+            Component.onCompleted: Appearance.dockOnFrameBand = dockRoot.onFrameBand
             readonly property bool isFullWidth: dockContent.isFullWidth
             readonly property bool isFullWidthConcave: dockContent.isFullWidthConcave
             readonly property bool isAttachedToEdge: dockContent.isAttachedToEdge
@@ -278,7 +415,52 @@ Scope {
                 }
             }
 
-            implicitWidth: Math.max(1, dockRoot.sizing.dockWidth)
+            // ── Under a Dynamic Island bar ───────────────────────────────────────
+            // That bar style reserves a whole strip but draws only a pill centred in
+            // it, and the compositor shortens a full-width dock to what the strip
+            // leaves - an empty column of wallpaper beside the dock, below the pill.
+            // Where the pill (fillets included) ends clear of the dock's band, the
+            // dock takes the strip back and runs on to the wrapped frame's ring, or
+            // to the screen edge without one. Where they would meet it stays
+            // beside the bar, as before.
+            readonly property var barIsland: GlobalStates.barIslands[dockRoot.screen?.name ?? ""] ?? null
+            readonly property real frameRing: Config.options?.appearance?.fakeScreenRounding === 3 ? (Config.options?.appearance?.wrappedFrameThickness ?? 0) : 0
+            readonly property real islandReclaim: {
+                const island = dockRoot.barIsland;
+                if (!dockRoot.isFullWidth || !island || !(island.reserve > 0))
+                    return 0;
+                // Only a bar lying across the dock's axis leaves it a stretch to take.
+                const barIsHorizontal = island.edge === "top" || island.edge === "bottom";
+                if (barIsHorizontal !== dock.isVertical)
+                    return 0;
+                // The pill is centred across the dock's own cross axis.
+                const crossLen = dock.isVertical ? (dockRoot.screen?.width ?? 1920) : (dockRoot.screen?.height ?? 1080);
+                const mainLen = dock.isVertical ? (dockRoot.screen?.height ?? 1080) : (dockRoot.screen?.width ?? 1920);
+                const atFar = dock.dockEffectivePosition === "bottom" || dock.dockEffectivePosition === "right";
+                // A pinned dock shortens the bar's window from its own side, which
+                // moves the pill's centre away from the dock by half the zone.
+                const pinZone = (dockRoot.pinnedShown && dockRoot.reveal) ? dockRoot.unmagnifiedThickness : 0;
+                const centre = crossLen / 2 + (atFar ? -pinZone : pinZone) / 2;
+                // The band the dock fills across the screen: its tray plus the room its
+                // concave corners keep, inside the frame's ring.
+                const band = dockRoot.frameRing + dockRoot.radiusFreeThickness + dockRoot.concaveCornerRadius + 8;
+                const clear = atFar
+                    ? (centre + island.extent / 2 <= crossLen - band)
+                    : (centre - island.extent / 2 >= band);
+                if (!clear)
+                    return 0;
+                // Take back only what the compositor really withheld: a pinned dock
+                // is arranged ahead of the bar's zone and can already span the screen,
+                // where a negative margin would push it past the edge. Until the first
+                // configure, assume the usual case - the strip is withheld.
+                const natural = dock.isVertical ? dockRoot._naturalH : dockRoot._naturalW;
+                if (!(natural > 1))
+                    return island.reserve;
+                const full = mainLen - dockRoot.frameRing * 2;
+                return Math.max(0, Math.min(island.reserve, Math.round(full - natural)));
+            }
+
+            implicitWidth: Math.max(1, dockRoot.sizing.dockWidth) + dockRoot.pushRoom
             implicitHeight: Math.max(1, dockRoot.sizing.dockHeight)
 
             anchors {
@@ -288,12 +470,20 @@ Scope {
                 right: dock.dockEffectivePosition !== "left"
             }
 
+            // A negative margin gives back the strip the compositor took for the bar.
+            margins {
+                left: dockRoot.barIsland?.edge === "left" ? -Math.round(dockRoot.islandReclaim) : 0
+                right: dockRoot.barIsland?.edge === "right" ? -Math.round(dockRoot.islandReclaim) : 0
+                top: dockRoot.barIsland?.edge === "top" ? -Math.round(dockRoot.islandReclaim) : 0
+                bottom: dockRoot.barIsland?.edge === "bottom" ? -Math.round(dockRoot.islandReclaim) : 0
+            }
+
             // Expose the raw window geometry for global gesture tracking,
             // independent of any interactive child item bounds.
             readonly property real actualWindowWidth: width
             readonly property real actualWindowHeight: height
 
-            exclusiveZone: (dock.pinned && reveal) ? unmagnifiedThickness : 0
+            exclusiveZone: (pinnedShown && reveal) ? unmagnifiedThickness : 0
             WlrLayershell.namespace: "quickshell:dock"
             WlrLayershell.layer: WlrLayer.Overlay
             color: "transparent"
@@ -313,7 +503,7 @@ Scope {
             // strip took the pointer again, and it showed: a loop at that spot.
             readonly property bool fullInputMask: !dockRoot.reveal
                 || dockContent.dragging
-                || (dockMouseArea.containsMouse && (dockRoot.enableMagnification || !dock.pinned))
+                || (dockMouseArea.containsMouse && (dockRoot.enableMagnification || !dockRoot.pinnedShown))
             mask: Region {
                 item: dockRoot.fullInputMask ? dockMouseArea : trayInputArea
             }
@@ -354,6 +544,8 @@ Scope {
             MouseArea {
                 id: dockMouseArea
                 hoverEnabled: dockRoot.reveal || dockRoot.effectiveHoverToReveal
+                // The top layer's snapshot stands in for it while a sidebar slides it.
+                opacity: dockRoot.pushCopyCovering ? 0 : 1
 
                 property real hoverRegion: Config.options?.dock?.hoverRegionHeight ?? 2
                 property real hiddenOffset: dockRoot.dockThickness - hoverRegion
@@ -380,12 +572,12 @@ Scope {
                     State {
                         name: "left"
                         AnchorChanges { target: dockMouseArea; anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter }
-                        PropertyChanges { target: dockMouseArea; anchors.leftMargin: -(currentOffset + dockMouseArea.dipOffset) }
+                        PropertyChanges { target: dockMouseArea; anchors.leftMargin: -(currentOffset + dockMouseArea.dipOffset) + dockRoot.sidebarPush }
                     },
                     State {
                         name: "right"
                         AnchorChanges { target: dockMouseArea; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter }
-                        PropertyChanges { target: dockMouseArea; anchors.rightMargin: -(currentOffset + dockMouseArea.dipOffset) }
+                        PropertyChanges { target: dockMouseArea; anchors.rightMargin: -(currentOffset + dockMouseArea.dipOffset) + dockRoot.sidebarPush }
                     }
                 ]
 
@@ -398,11 +590,13 @@ Scope {
                     animation: Appearance.animation.elementMoveFast.numberAnimation.createObject(dockMouseArea)
                 }
                 Behavior on anchors.leftMargin {
-                    enabled: !DockPresets.isSwitchingPreset
+                    // The sidebar's own clock drives the push frame by frame.
+                    enabled: !DockPresets.isSwitchingPreset && !dockRoot.sidebarPushing
                     animation: Appearance.animation.elementMoveFast.numberAnimation.createObject(dockMouseArea)
                 }
                 Behavior on anchors.rightMargin {
-                    enabled: !DockPresets.isSwitchingPreset
+                    // The sidebar's own clock drives the push frame by frame.
+                    enabled: !DockPresets.isSwitchingPreset && !dockRoot.sidebarPushing
                     animation: Appearance.animation.elementMoveFast.numberAnimation.createObject(dockMouseArea)
                 }
 
@@ -469,7 +663,7 @@ Scope {
                             return Qt.vector2d(0, -2);
                         }
                         visible: !dockContent.islandsStyle && !dockRoot.isDynamicIsland && !dockRoot.isTransparent
-                            && opacity > 0.01
+                            && !dockRoot.onFrameBand && opacity > 0.01
                             && !Config.options.appearance.transparency.popups
                             && !Config.options.appearance.transparency.enable
                     }
@@ -493,7 +687,7 @@ Scope {
                         // at all (dynamic island, full width).
                         readonly property real trayCornerRadius: (dockRoot.isDynamicIsland || dockRoot.isHug || dockRoot.isFullWidth) ? 0 : dockContent.dockCornerRadius
 
-                        color: (dockRoot.isDynamicIsland || dockRoot.isTransparent) ? "transparent" : Appearance.colors.colLayer0
+                        color: (dockRoot.isDynamicIsland || dockRoot.isTransparent || dockRoot.onFrameBand) ? "transparent" : Appearance.colors.colLayer0
                         radius: trayCornerRadius
                         topLeftRadius: dockRoot.isHug ? ((dock.dockEffectivePosition === "bottom" || dock.dockEffectivePosition === "right") ? dockContent.dockCornerRadius : 0) : trayCornerRadius
                         topRightRadius: dockRoot.isHug ? ((dock.dockEffectivePosition === "bottom" || dock.dockEffectivePosition === "left") ? dockContent.dockCornerRadius : 0) : trayCornerRadius
@@ -723,10 +917,13 @@ Scope {
                         z: 1
                         isPinned: dock.pinned
                         currentScreen: dockRoot.screen
+                        // The dynamic island insets the content by its concave corners.
+                        availableMainExtent: Math.max(0, dockRoot.sizing.trayMainCap
+                            - (dockRoot.isDynamicIsland ? dockRoot.concaveCornerRadius * 2 : 0))
                         dockRevealed: dockRoot.reveal
                         dockWindowVisible: dockRoot.visible
                         onTogglePinRequested: {
-                            dock.pinned = !dock.pinned
+                            Config.options.dock.pinnedOnStartup = !dock.pinned
                         }
                     }
                 }

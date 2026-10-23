@@ -77,6 +77,30 @@ Scope {
         }
         property var activeTheme: barThemes.getTheme(Config.options.bar.expressiveColorTheme)
 
+        // The Dynamic Island style reserves the whole strip but draws only a pill
+        // centred in it: the dock reads what is really occupied to take the rest.
+        // An autohiding bar animates its zone, and one that overlaps apps reserves
+        // none, so neither publishes anything to reclaim.
+        QtObject {
+            id: islandPublisher
+            readonly property string screenName: root.screen ? root.screen.name : ""
+            readonly property string edge: root.isBottom ? "bottom" : "top"
+            readonly property real extent: barContent.islandExtent
+            readonly property real reserve: (BarInteraction.autoHide
+                    || (Config.ready && Config.options.bar.dynamicIsland.notchMode.enable && Config.options.bar.dynamicIsland.notchMode.overlapApps)) ? 0
+                : Math.max(0, Appearance.sizes.baseBarHeight - barSpaceReserver.minZone)
+
+            function publish() {
+                GlobalStates.setBarIsland(islandPublisher.screenName, islandPublisher.edge, islandPublisher.extent, islandPublisher.reserve);
+            }
+
+            onEdgeChanged: publish()
+            onExtentChanged: publish()
+            onReserveChanged: publish()
+            Component.onCompleted: publish()
+            Component.onDestruction: GlobalStates.setBarIsland(islandPublisher.screenName, "", 0, 0)
+        }
+
         // ── Window tracking (for showBarBackground) ──────────────────────────
         Connections {
             enabled: Config.options.bar.barBackgroundStyle === 2 || (Config.options.bar.barBackgroundStyle === 3 && (BarInteraction.cornerStyle === 0 || BarInteraction.cornerStyle === 1))
@@ -350,7 +374,7 @@ Scope {
                             left: parent.left
                         }
                         implicitSize: Appearance.rounding.screenRounding
-                        color: barRoot.showBarBackground ? (Config.options.bar.expressiveColors ? barRoot.activeTheme.barBackground : Appearance.colors.colLayer0) : "transparent"
+                        color: barRoot.showBarBackground ? (Config.options.bar.amoledBackground ? "#000000" : Config.options.bar.expressiveColors ? barRoot.activeTheme.barBackground : Appearance.colors.colLayer0) : "transparent"
                         corner: RoundCorner.CornerEnum.TopLeft
                         states: State {
                             name: "bottom"
@@ -368,7 +392,7 @@ Scope {
                             bottom: root.isBottom ? parent.bottom : undefined
                         }
                         implicitSize: Appearance.rounding.screenRounding
-                        color: barRoot.showBarBackground ? (Config.options.bar.expressiveColors ? barRoot.activeTheme.barBackground : Appearance.colors.colLayer0) : "transparent"
+                        color: barRoot.showBarBackground ? (Config.options.bar.amoledBackground ? "#000000" : Config.options.bar.expressiveColors ? barRoot.activeTheme.barBackground : Appearance.colors.colLayer0) : "transparent"
                         corner: RoundCorner.CornerEnum.TopRight
                         states: State {
                             name: "bottom"

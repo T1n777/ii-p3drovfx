@@ -16,6 +16,7 @@ import qs.modules.ii.bluetoothPairing
 import qs.modules.ii.cheatsheet
 import qs.modules.ii.notes
 import qs.modules.ii.clock
+import qs.modules.ii.health
 import qs.modules.ii.dock
 import qs.modules.ii.lock
 import qs.modules.ii.mediaControls
@@ -42,6 +43,7 @@ import qs.modules.ii.localSendPopup
 import qs.modules.ii.scratchpadOverlay
 import qs.modules.ii.keyboardLayoutTransitionPopup
 import qs.modules.ii.keypressDisplay
+import qs.modules.ii.liveDraw
 import qs.modules.ii.topLayer
 import qs.modules.ii.tilingAssistant
 import qs.modules.ii.usage
@@ -79,10 +81,12 @@ Scope {
     PanelUrlLoader {
         extraCondition: !BarPlacement.vertical && barExtraCondition && !GlobalStates.connectModeActive
         panelUrl: Qt.resolvedUrl("../modules/ii/bar/Bar.qml")
+        priority: 4 // First paint: bar, background, island, dock (see PanelSchedule)
     }
     PanelUrlLoader {
         extraCondition: Config.options.background.enable
         panelUrl: Qt.resolvedUrl("../modules/ii/background/Background.qml")
+        priority: 3
     }
     PanelUrlLoader {
         // The desktop layout editor's chrome; nothing to edit without the background.
@@ -124,14 +128,20 @@ Scope {
         extraCondition: Config.options.modes.overlayEnabled
         panelUrl: Qt.resolvedUrl("../modules/ii/modes/ModesApp.qml")
     }
+    PanelUrlLoader {
+        // Same shape as the clock app; the helper runs in HealthService either way.
+        extraCondition: Config.options.health?.enable ?? true
+        panelUrl: Qt.resolvedUrl("../modules/ii/health/HealthApp.qml")
+    }
     // The mode start/end banner; the dynamic island draws it when a notch is on.
     PanelUrlLoader {
-        extraCondition: (Config.options?.modes?.enable ?? true) && !IslandPolicy.ownsModeFlash
+        extraCondition: (Config.options?.modes?.enable ?? false) && !IslandPolicy.ownsModeFlash
         panelUrl: Qt.resolvedUrl("../modules/ii/modeFlashPopup/ModeFlashPopup.qml")
     }
     PanelUrlLoader {
         extraCondition: Config.options.dock.enable
         panelUrl: Qt.resolvedUrl("../modules/ii/dock/Dock.qml")
+        priority: 1
     }
     PanelUrlLoader {
         panelUrl: Qt.resolvedUrl("../modules/ii/lock/Lock.qml")
@@ -173,6 +183,11 @@ Scope {
         // and invisible until a recording or the quick toggle asks for them.
         extraCondition: Config.ready
         panelUrl: Qt.resolvedUrl("../modules/ii/keypressDisplay/KeypressDisplay.qml")
+    }
+    PanelUrlLoader {
+        // The Scope is a keybind and an IPC target; the per-screen surfaces inside load
+        // only while the tray is open or a screen has ink on it.
+        panelUrl: Qt.resolvedUrl("../modules/ii/liveDraw/LiveDrawOverlay.qml")
     }
     PanelUrlLoader {
         panelUrl: Qt.resolvedUrl("../modules/common/onScreenKeyboard/OnScreenKeyboard.qml")
@@ -271,6 +286,7 @@ Scope {
     PanelUrlLoader {
         extraCondition: BarPlacement.vertical && barExtraCondition && !GlobalStates.connectModeActive
         panelUrl: Qt.resolvedUrl("../modules/ii/verticalBar/VerticalBar.qml")
+        priority: 4
     }
     PanelUrlLoader {
         panelUrl: Qt.resolvedUrl("../modules/ii/wallpaperSelector/WallpaperSelector.qml")
@@ -304,6 +320,11 @@ Scope {
         panelUrl: Qt.resolvedUrl("../modules/ii/screenTimeOverlay/ScreenTimeOverlay.qml")
     }
     PanelUrlLoader {
+        // Intrusive bedtime: the modal past the target, snoozes, then the shutdown countdown.
+        extraCondition: BedtimeService.intrusiveDue
+        panelUrl: Qt.resolvedUrl("../modules/ii/bedtimeOverlay/BedtimeOverlay.qml")
+    }
+    PanelUrlLoader {
         extraCondition: GlobalStates.screenshotOverlayOpen
         panelUrl: Qt.resolvedUrl("../modules/ii/screenshotOverlay/ScreenshotOverlay.qml")
     }
@@ -326,6 +347,7 @@ Scope {
     PanelUrlLoader {
         extraCondition: IslandPolicy.enabled
         panelUrl: Qt.resolvedUrl("../modules/ii/dynamicIsland/DynamicIsland.qml")
+        priority: 2
     }
     PanelUrlLoader {
         extraCondition: Config.ready && Boolean(Config.options && Config.options.interactions && Config.options.interactions.touchGestures && Config.options.interactions.touchGestures.enable)

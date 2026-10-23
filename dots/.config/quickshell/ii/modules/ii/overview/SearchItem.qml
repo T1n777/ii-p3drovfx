@@ -80,6 +80,26 @@ RippleButton {
     visible: root.entryShown
     // Hosts override this; it is the inset the row keeps from the panel edge.
     property int horizontalMargin: Appearance.sizes.elevationMargin
+    // How far the surface the row lives on (the expressive pane) sits inside the
+    // row's own width. Sliding action chips are clipped to that surface, not to
+    // the full list width, or they spill out past the pane's rounded edge.
+    property real clipInset: 0
+    readonly property real innerMargin: root.horizontalMargin - root.clipInset
+    /**
+     * Material 3 Expressive rows (Settings › Launcher › Panel appearance).
+     *
+     * Taller rows; the icon sits on a Material shape that morphs from a circle
+     * to a scalloped cookie when the row is selected; the name is set in the
+     * rounded title face and gains weight with the arrival accent; the
+     * selection is the tonal primary container instead of solid primary, so
+     * the shape-backed icon is the strongest thing on the row; the selected
+     * row closes with an enter chip naming what Enter does.
+     */
+    property string resultsStyle: Config.options.search.appearance.resultsStyle
+    readonly property bool expressive: root.resultsStyle === "expressive"
+    readonly property color colSelectedFill: root.expressive ? Appearance.colors.colPrimaryContainer : Appearance.colors.colPrimary
+    readonly property color colSelectedFillActive: root.expressive ? Appearance.colors.colPrimaryContainerActive : Appearance.colors.colPrimaryActive
+    readonly property color colOnSelected: root.expressive ? Appearance.colors.colOnPrimaryContainer : Appearance.colors.colOnPrimary
     property int buttonHorizontalPadding: 10
     property int buttonVerticalPadding: 8
     /**
@@ -217,16 +237,21 @@ RippleButton {
         return from + (to - from) * progress;
     }
 
-    readonly property real restTopRadius: root.isFirst
+    // Expressive rows sit inside their group's pane with no surface of their
+    // own: every edge is the pill the selection and hover draw.
+    readonly property real restTopRadius: root.expressive ? root.pillRadius : root.isFirst
         ? Appearance.rounding.large
         : root.mixReal(Appearance.rounding.small, root.pillRadius, root.topOpenProgress)
-    readonly property real restBottomRadius: root.isLast
+    readonly property real restBottomRadius: root.expressive ? root.pillRadius : root.isLast
         ? Appearance.rounding.large
         : root.mixReal(Appearance.rounding.small, root.pillRadius, root.bottomOpenProgress)
 
     readonly property real contractedWidth: 160
     readonly property real actionBtnSpacing: 4
     readonly property real actionBtnPadY: 4
+    // A long list cannot show every label inside the card, so only the chosen
+    // action keeps its label and the rest shrink to their icon.
+    readonly property bool compactActions: root.allActionItems.length >= 4
 
     property var allActionItems: {
         // Lazy: only compute when this item is selected or the panel is open.
@@ -369,8 +394,8 @@ RippleButton {
         }
     }
 
-    property real normalHeight: 52
-    readonly property real rowHeight: 52
+    property real normalHeight: root.expressive ? 60 : 52
+    readonly property real rowHeight: root.expressive ? 60 : 52
     onActionPanelOpenChanged: {
         if (actionPanelOpen) {
             normalHeight = root.height > 0 ? root.height : contentRow.implicitHeight + buttonVerticalPadding * 2;
@@ -402,11 +427,11 @@ RippleButton {
         let btnX = root.contractedWidth + root.actionBtnSpacing;
         for (let i = 0; i < root.actionSelectedIndex; i++) {
             const btn = actionRepeater.itemAt(i);
-            btnX += (btn ? btn.width : 0) + root.actionBtnSpacing;
+            btnX += (btn ? btn.targetWidth : 0) + root.actionBtnSpacing;
         }
         const selBtn = actionRepeater.itemAt(root.actionSelectedIndex);
-        const selRight = btnX + (selBtn ? selBtn.width : 0);
-        return Math.min(root.horizontalMargin, root.width - 4 - selRight);
+        const selRight = btnX + (selBtn ? selBtn.targetWidth : 0);
+        return Math.min(root.innerMargin, root.width - 2 * root.clipInset - root.innerMargin - selRight);
     }
     property real actionScrollX: root.actionOpenX
     Behavior on actionScrollX {
@@ -455,8 +480,8 @@ RippleButton {
     readonly property color colRestForeground: root.isBuiltinItem ? Appearance.colors.colOnTertiaryContainer : Appearance.m3colors.m3onSurface
     readonly property color colRestSubtext: root.isBuiltinItem ? Appearance.colors.colOnTertiaryContainer : Appearance.colors.colSubtext
     // Foreground follows the fill as it grows underneath, on the same progress.
-    property color colForeground: ColorUtils.mix(Appearance.colors.colOnPrimary, root.colRestForeground, root.selectionProgress)
-    property color colSubtextForeground: ColorUtils.mix(Appearance.colors.colOnPrimary, root.colRestSubtext, root.selectionProgress)
+    property color colForeground: ColorUtils.mix(root.colOnSelected, root.colRestForeground, root.selectionProgress)
+    property color colSubtextForeground: ColorUtils.mix(root.colOnSelected, root.colRestSubtext, root.selectionProgress)
 
     readonly property string highlightPrefix: `<u><font color="${Appearance.colors.colPrimary}">`
     readonly property string highlightSuffix: `</font></u>`
@@ -521,8 +546,8 @@ RippleButton {
     background: Rectangle {
         id: bgRect
         anchors.fill: root
-        anchors.leftMargin: 0
-        anchors.rightMargin: 0
+        anchors.leftMargin: root.clipInset
+        anchors.rightMargin: root.clipInset
         color: "transparent"
         antialiasing: true
         clip: true
@@ -540,11 +565,11 @@ RippleButton {
             anchors.bottom: parent.bottom
             spacing: root.actionBtnSpacing
 
-            x: root.mixReal(root.horizontalMargin, root.actionScrollX, root.actionProgress)
+            x: root.mixReal(root.innerMargin, root.actionScrollX, root.actionProgress)
 
             Rectangle {
                 id: itemRect
-                width: root.mixReal(bgRect.width - root.horizontalMargin * 2, root.contractedWidth, root.actionProgress)
+                width: root.mixReal(bgRect.width - root.innerMargin * 2, root.contractedWidth, root.actionProgress)
                 height: slideRow.height
                 y: 0
                 topLeftRadius: bgRect.topLeftRadius
@@ -553,7 +578,10 @@ RippleButton {
                 bottomRightRadius: root.mixReal(bgRect.bottomRightRadius, root.animatedActionTrailingRadius, root.actionProgress)
                 // The resting surface never changes colour on selection: the
                 // sliding pill passes over it instead.
-                color: root.colBackground
+                color: !root.expressive || root.isBuiltinItem ? root.colBackground
+                    : (root.down || root.keyboardDown) ? Appearance.colors.colPrimaryContainerActive
+                    : root.hovered ? Appearance.colors.colSurfaceContainerHighest
+                    : ColorUtils.transparentize(Appearance.colors.colSurfaceContainerHighest, 1)
                 clip: true
                 antialiasing: true
 
@@ -587,7 +615,7 @@ RippleButton {
                     topRightRadius: Math.min(enteredFromTop ? itemRect.topRightRadius : endRadius, span / 2)
                     bottomLeftRadius: Math.min(exitsAtBottom ? itemRect.bottomLeftRadius : endRadius, span / 2)
                     bottomRightRadius: Math.min(exitsAtBottom ? itemRect.bottomRightRadius : endRadius, span / 2)
-                    color: (root.down || root.keyboardDown) ? Appearance.colors.colPrimaryActive : Appearance.colors.colPrimary
+                    color: (root.down || root.keyboardDown) ? root.colSelectedFillActive : root.colSelectedFill
                     antialiasing: true
                 }
 
@@ -607,10 +635,16 @@ RippleButton {
 
                     Item {
                         id: iconContainer
-                        Layout.preferredWidth: iconVisible ? 36 : 0
-                        Layout.preferredHeight: 36
+                        Layout.preferredWidth: iconVisible ? size : 0
+                        Layout.preferredHeight: size
                         visible: iconVisible
                         readonly property bool iconVisible: root.iconType !== LauncherSearchResult.IconType.None
+                        readonly property real size: root.expressive ? 44 : 36
+                        // Expressive rows stand app and symbol icons on a shape
+                        // instead of the clipping circle.
+                        readonly property bool onShape: root.expressive
+                            && (root.iconType === LauncherSearchResult.IconType.System
+                                || root.iconType === LauncherSearchResult.IconType.Material)
                         // Lifts past its size on the overshooting accent curve and
                         // settles at a slightly larger resting size while selected.
                         transform: Scale {
@@ -624,9 +658,46 @@ RippleButton {
                         // fill almost all of it, so a square icon with no
                         // rounding of its own has its corners cut to the circle
                         // instead of poking out past it.
+                        // Shape is state: a circle at rest morphs into a
+                        // scalloped cookie in primary when the row is selected.
+                        Loader {
+                            anchors.fill: parent
+                            active: iconContainer.onShape
+                            visible: active
+                            sourceComponent: Component {
+                                MaterialShape {
+                                    readonly property bool lit: root.isSelected && !root.actionPanelOpen
+                                    shape: lit ? MaterialShape.Shape.Cookie9Sided : MaterialShape.Shape.Circle
+                                    color: lit ? Appearance.colors.colPrimary
+                                        : root.isBuiltinItem ? Appearance.colors.colTertiaryContainerActive
+                                        : Appearance.colors.colSurfaceContainerHighest
+                                    Behavior on color {
+                                        enabled: root.animateSelection
+                                        ColorAnimation {
+                                            duration: root.selectionMotionDuration
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Loader {
+                            anchors.centerIn: parent
+                            active: iconContainer.onShape && root.iconType === LauncherSearchResult.IconType.System
+                            visible: active
+                            sourceComponent: Component {
+                                IconImage {
+                                    source: Quickshell.iconPath(root.iconName, "image-missing")
+                                    implicitSize: 28
+                                    smooth: true
+                                    asynchronous: true
+                                }
+                            }
+                        }
+
                         ClippingRectangle {
                             anchors.fill: parent
-                            visible: root.iconType === LauncherSearchResult.IconType.System
+                            visible: root.iconType === LauncherSearchResult.IconType.System && !iconContainer.onShape
                             radius: width / 2
                             color: ColorUtils.mix(Appearance.colors.colPrimaryContainer, Appearance.colors.colSurfaceContainerHighest, root.actionPanelOpen ? 1 : root.selectionProgress)
 
@@ -650,9 +721,11 @@ RippleButton {
                             text: root.iconType === LauncherSearchResult.IconType.Image
                                 ? (root.fallbackIconName.length > 0 ? root.fallbackIconName : "link")
                                 : root.materialSymbol
-                            iconSize: 26
+                            iconSize: root.expressive ? 24 : 26
                             fill: root.isSelected ? 1.0 : 0.0
-                            color: root.colForeground
+                            color: iconContainer.onShape
+                                ? (root.isSelected && !root.actionPanelOpen ? Appearance.colors.colOnPrimary : root.colRestForeground)
+                                : root.colForeground
                             Behavior on iconSize {
                                 enabled: !root.animationsDisabled
                                 NumberAnimation {
@@ -698,7 +771,9 @@ RippleButton {
                                     MaterialShape {
                                         anchors.fill: parent
                                         shape: MaterialShape.Shape.Sunny
-                                        color: root.isSelected ? Appearance.colors.colPrimaryContainer : Appearance.colors.colSurfaceContainerHighest
+                                        // On the expressive tonal pill a primary
+                                        // container shape would vanish into it.
+                                        color: root.isSelected ? (root.expressive ? Appearance.colors.colPrimary : Appearance.colors.colPrimaryContainer) : Appearance.colors.colSurfaceContainerHighest
                                         Behavior on color {
                                             enabled: root.animateSelection
                                             ColorAnimation {
@@ -711,7 +786,7 @@ RippleButton {
                                         anchors.centerIn: parent
                                         text: root.bigText
                                         font.pixelSize: root.actionPanelOpen ? Appearance.font.pixelSize.smaller : Appearance.font.pixelSize.normal
-                                        color: root.isSelected ? Appearance.colors.colOnPrimaryContainer : root.colForeground
+                                        color: root.isSelected ? (root.expressive ? Appearance.colors.colOnPrimary : Appearance.colors.colOnPrimaryContainer) : root.colForeground
                                     }
                                 }
                             }
@@ -805,8 +880,14 @@ RippleButton {
                                 id: nameText
                                 Layout.fillWidth: true
                                 textFormat: Text.StyledText
-                                font.pixelSize: Appearance.font.pixelSize.small
-                                font.family: (root.fontType === "monospace" || root.contentType === "json") ? Appearance.font.family.monospace : Appearance.font.family.main
+                                readonly property bool monospaced: root.fontType === "monospace" || root.contentType === "json"
+                                font.pixelSize: root.expressive ? Appearance.font.pixelSize.normal : Appearance.font.pixelSize.small
+                                font.family: monospaced ? Appearance.font.family.monospace : root.expressive ? Appearance.font.family.title : Appearance.font.family.main
+                                // Weight eases up with the arrival accent instead
+                                // of swapping to bold.
+                                font.variableAxes: root.expressive && !monospaced
+                                    ? ({ "wght": Appearance.font.variableAxes.blend(480, 700, root.selectionAccent), "ROND": 100 })
+                                    : Appearance.font.variableAxes.main
                                 color: root.colForeground
                                 horizontalAlignment: Text.AlignLeft
                                 elide: Text.ElideMiddle
@@ -821,10 +902,15 @@ RippleButton {
 
                             StyledText {
                                 text: root.itemType
-                                color: root.colSubtextForeground
+                                // Expressive: a bold caption in the accent, the
+                                // row's second voice next to the plain comment.
+                                color: root.expressive && !root.isBuiltinItem
+                                    ? ColorUtils.mix(root.colOnSelected, Appearance.colors.colPrimary, root.selectionProgress)
+                                    : root.colSubtextForeground
                                 font.pixelSize: Appearance.font.pixelSize.smaller
                                 font.family: Appearance.font.family.main
-                                opacity: root.isSelected ? 0.7 : (root.isBuiltinItem ? 1.0 : 0.7)
+                                font.weight: root.expressive ? Font.Bold : Font.Normal
+                                opacity: root.expressive ? 1.0 : root.isSelected ? 0.7 : (root.isBuiltinItem ? 1.0 : 0.7)
                                 visible: root.itemType && root.itemType != Translation.tr("App") && !root.entry?.isMath
                             }
 
@@ -862,7 +948,7 @@ RippleButton {
                                     StyledText {
                                         text: Translation.tr("Math & Unit Converter")
                                         font.pixelSize: Appearance.font.pixelSize.smaller
-                                        color: root.isSelected ? Appearance.colors.colOnPrimary : Appearance.colors.colSubtext
+                                        color: root.isSelected ? root.colOnSelected : Appearance.colors.colSubtext
                                         font.family: Appearance.font.family.main
                                         opacity: 0.7
                                     }
@@ -879,14 +965,14 @@ RippleButton {
                                             }
                                             font.pixelSize: Appearance.font.pixelSize.small
                                             font.family: Appearance.font.family.monospace
-                                            color: root.isSelected ? Appearance.colors.colOnPrimary : Appearance.colors.colSubtext
+                                            color: root.isSelected ? root.colOnSelected : Appearance.colors.colSubtext
                                         }
 
                                         // Elegant Arrow Indicator
                                         MaterialSymbol {
                                             text: "arrow_forward"
                                             iconSize: Appearance.font.pixelSize.small
-                                            color: root.isSelected ? Appearance.colors.colOnPrimary : Appearance.colors.colPrimary
+                                            color: root.isSelected ? root.colOnSelected : Appearance.colors.colPrimary
                                         }
 
                                         // Evaluated Result
@@ -899,7 +985,7 @@ RippleButton {
                                             font.pixelSize: Appearance.font.pixelSize.small
                                             font.family: Appearance.font.family.monospace
                                             font.bold: true
-                                            color: root.isSelected ? Appearance.colors.colOnPrimary : Appearance.colors.colPrimary
+                                            color: root.isSelected ? root.colOnSelected : Appearance.colors.colPrimary
                                         }
                                     }
                                 }
@@ -926,7 +1012,7 @@ RippleButton {
                         font.pixelSize: Appearance.font.pixelSize.small
                         font.family: Appearance.font.family.main
                         font.weight: Font.Medium
-                        color: root.isSelected ? Appearance.colors.colOnPrimary : Appearance.colors.colOnSecondaryContainer
+                        color: root.isSelected ? root.colOnSelected : Appearance.colors.colOnSecondaryContainer
                         elide: Text.ElideMiddle
                     }
 
@@ -956,8 +1042,51 @@ RippleButton {
                             sourceComponent: Component {
                                 KeyHint {
                                     keys: ["Ctrl", "K"]
-                                    surface: root.selectionProgress > 0.5 ? Appearance.colors.colPrimary : Appearance.colors.colSurfaceContainerHigh
-                                    onSurface: root.selectionProgress > 0.5 ? Appearance.colors.colOnPrimary : Appearance.colors.colOnSurface
+                                    surface: root.selectionProgress > 0.5 ? root.colSelectedFill : Appearance.colors.colSurfaceContainerHigh
+                                    onSurface: root.selectionProgress > 0.5 ? root.colOnSelected : Appearance.colors.colOnSurface
+                                }
+                            }
+                        }
+                    }
+
+                    // Expressive: what Enter does, on the selected row only. Its
+                    // opacity rides the selection pill's coverage, so it arrives
+                    // and leaves with the pill instead of on a curve of its own.
+                    Loader {
+                        Layout.alignment: Qt.AlignVCenter
+                        active: root.expressive && !root.actionPanelOpen && !root.hasInlineSwitch
+                            && root.selectionProgress > 0.01 && root.itemClickActionName.length > 0
+                        visible: active
+                        sourceComponent: Component {
+                            Rectangle {
+                                implicitWidth: enterChipRow.implicitWidth + 20
+                                implicitHeight: 28
+                                radius: Math.min(height / 2, Appearance.rounding.large)
+                                color: Appearance.colors.colPrimary
+                                opacity: root.selectionProgress
+                                transform: Translate {
+                                    x: (1 - root.selectionProgress) * Appearance.sizes.elevationMargin
+                                }
+
+                                RowLayout {
+                                    id: enterChipRow
+                                    anchors.centerIn: parent
+                                    spacing: 4
+
+                                    StyledText {
+                                        Layout.maximumWidth: 110
+                                        text: root.itemClickActionName
+                                        elide: Text.ElideRight
+                                        font.pixelSize: Appearance.font.pixelSize.smaller
+                                        font.weight: Font.DemiBold
+                                        color: Appearance.colors.colOnPrimary
+                                    }
+
+                                    MaterialSymbol {
+                                        text: "keyboard_return"
+                                        iconSize: Appearance.font.pixelSize.normal
+                                        color: Appearance.colors.colOnPrimary
+                                    }
                                 }
                             }
                         }
@@ -970,8 +1099,8 @@ RippleButton {
                         sourceComponent: Component {
                             KeyHint {
                                 keys: root.entry?.keyHints ?? []
-                                surface: root.selectionProgress > 0.5 ? Appearance.colors.colPrimary : Appearance.colors.colSurfaceContainerHigh
-                                onSurface: root.selectionProgress > 0.5 ? Appearance.colors.colOnPrimary : Appearance.colors.colOnSurface
+                                surface: root.selectionProgress > 0.5 ? root.colSelectedFill : Appearance.colors.colSurfaceContainerHigh
+                                onSurface: root.selectionProgress > 0.5 ? root.colOnSelected : Appearance.colors.colOnSurface
                             }
                         }
                     }
@@ -984,8 +1113,8 @@ RippleButton {
                         sourceComponent: Component {
                             KeyHint {
                                 keys: ["Ctrl", String(root.itemKeybind?.letter ?? "").toUpperCase()]
-                                surface: root.selectionProgress > 0.5 ? Appearance.colors.colPrimary : Appearance.colors.colSurfaceContainerHigh
-                                onSurface: root.selectionProgress > 0.5 ? Appearance.colors.colOnPrimary : Appearance.colors.colOnSurface
+                                surface: root.selectionProgress > 0.5 ? root.colSelectedFill : Appearance.colors.colSurfaceContainerHigh
+                                onSurface: root.selectionProgress > 0.5 ? root.colOnSelected : Appearance.colors.colOnSurface
                             }
                         }
                     }
@@ -1022,7 +1151,20 @@ RippleButton {
                     readonly property int hIdx: index + 1
                     readonly property bool isBtnActive: root.isSelected && isActionSelected
 
-                    width: actionBtnContent.implicitWidth + 24
+                    // 0 = icon only, 1 = icon and label. The scroll target reads
+                    // targetWidth, so it does not chase the animated width.
+                    readonly property bool compact: root.compactActions && !isActionSelected
+                    readonly property real labelWidth: Math.min(120, actionLabel.implicitWidth)
+                    readonly property real targetWidth: 36 + 24 + (compact ? 0 : 8 + labelWidth)
+                    property real labelProgress: compact ? 0 : 1
+                    Behavior on labelProgress {
+                        enabled: root.actionPanelOpen && !root.animationsDisabled
+                        NumberAnimation {
+                            duration: root.scaledDuration(140)
+                            easing.type: Easing.OutQuad
+                        }
+                    }
+                    width: 36 + 24 + labelProgress * (8 + labelWidth)
                     height: slideRow.height
                     y: 0
                     topLeftRadius: hIdx === root.activeHIndex || (hIdx - 1) === root.activeHIndex ? root.pillRadius : Appearance.rounding.small
@@ -1086,9 +1228,7 @@ RippleButton {
                     RowLayout {
                         id: actionBtnContent
                         anchors.centerIn: parent
-                        spacing: 8
-                        Layout.leftMargin: 6
-                        Layout.rightMargin: 10
+                        spacing: 0
 
                         Item {
                             Layout.preferredWidth: 36
@@ -1131,12 +1271,17 @@ RippleButton {
                         }
 
                         StyledText {
+                            id: actionLabel
                             text: actionBtn.modelData.name
                             font.pixelSize: Appearance.font.pixelSize.small
                             font.family: Appearance.font.family.main
                             font.weight: Font.Medium
                             color: actionBtn.isBtnActive ? Appearance.colors.colOnPrimaryContainer : Appearance.m3colors.m3onSurface
                             elide: Text.ElideRight
+                            clip: true
+                            opacity: actionBtn.labelProgress
+                            Layout.leftMargin: 8 * actionBtn.labelProgress
+                            Layout.preferredWidth: actionBtn.labelProgress * actionBtn.labelWidth
                             Layout.maximumWidth: 120
                             Behavior on color {
                                 enabled: !root.animationsDisabled

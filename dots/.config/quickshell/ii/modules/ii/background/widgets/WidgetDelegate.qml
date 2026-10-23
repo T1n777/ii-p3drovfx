@@ -7,7 +7,9 @@ import qs.modules.ii.background.widgets.DateWidget
 import qs.modules.ii.background.widgets.bluetooth
 import qs.modules.ii.background.widgets.clock
 import qs.modules.ii.background.widgets.media
+import qs.modules.ii.background.widgets.phone
 import qs.modules.ii.background.widgets.photo
+import qs.modules.ii.background.widgets.productivity
 import qs.modules.ii.background.widgets.system
 import qs.modules.ii.background.widgets.utility
 import qs.modules.ii.background.widgets.weather
@@ -44,6 +46,8 @@ Item {
     required property real wallpaperScale
     required property bool wallpaperSafetyTriggered
     required property bool lockAnimationActive
+    // The desktop is covered: widgets hold their continuous updates (AbstractBackgroundWidget.live).
+    property bool widgetsPaused: false
     required property var widgetSizes
     required property int widgetSizesVersion
     required property int staggerDelay
@@ -58,6 +62,9 @@ Item {
         "clock_flex": component_clock_flex,
         "clock_hori": component_clock_hori,
         "clock_ios": component_clock_ios,
+        "clock_ios_tile": component_clock_ios_tile,
+        "clock_ios_analog": component_clock_ios_analog,
+        "clock_california": component_clock_california,
         "clock_nothing": component_clock_nothing,
         "nothing_wheel_clock": component_nothing_wheel_clock,
         "clock_dial": component_clock_dial,
@@ -70,6 +77,24 @@ Item {
         "circle_pointer_clock": component_circle_pointer_clock,
         "triple_ring_clock": component_triple_ring_clock,
         "grid_card_clock": component_grid_card_clock,
+        "clock_numeral": component_clock_numeral,
+        "clock_duo": component_clock_duo,
+        "todo_focus": component_todo_focus,
+        "todo_board": component_todo_board,
+        "todo_column": component_todo_column,
+        "timer_pomodoro": component_timer_pomodoro,
+        "timer_stopwatch": component_timer_stopwatch,
+        "timer_countdown": component_timer_countdown,
+        "translator_widget": component_translator_widget,
+        "water_glass": component_water_glass,
+        "phone_key": component_phone_key,
+        "phone_deck": component_phone_deck,
+        "phone_tower": component_phone_tower,
+        "send_drop": component_send_drop,
+        "session_grid": component_session_grid,
+        "clock_type_weight": component_clock_type_weight,
+        "clock_type_width": component_clock_type_width,
+        "clock_type_stack": component_clock_type_stack,
         "clock_expressive_card": component_clock_expressive_card,
         "circular_media": component_circular_media,
         "media_circular": component_media_circular,
@@ -78,6 +103,10 @@ Item {
         "media_cd": component_media_cd,
         "nothing_ring_media": component_nothing_ring_media,
         "compact_media": component_compact_media,
+        "media_poster": component_media_poster,
+        "media_deck": component_media_deck,
+        "media_halo": component_media_halo,
+        "media_cover": component_media_cover,
         "weather_default": component_weather_default,
         "weather_expressive": component_weather_expressive,
         "weather_forecast": component_weather_forecast,
@@ -104,8 +133,18 @@ Item {
         "calendar_next_event": component_calendar_next_event,
         "calendar_pill": component_calendar_pill,
         "calendar_upcoming_3days": component_calendar_upcoming_3days,
+        "calendar_date_type": component_calendar_date_type,
+        "calendar_date_shapes": component_calendar_date_shapes,
+        "calendar_date_stack": component_calendar_date_stack,
+        "calendar_date_banner": component_calendar_date_banner,
+        "calendar_week_strip": component_calendar_week_strip,
+        "calendar_week_agenda": component_calendar_week_agenda,
+        "calendar_month_tall": component_calendar_month_tall,
         "photo": component_photo,
         "photo_1x1": component_photo_1x1,
+        "photo_plain_1x1": component_photo_plain_1x1,
+        "photo_plain_2x1": component_photo_plain_2x1,
+        "photo_plain_1x2": component_photo_plain_1x2,
         "photo_weather_2x1": component_photo_weather_2x1,
         "photo_pill_2x1": component_photo_pill_2x1,
         "photo_minimal_temp_2x1": component_photo_minimal_temp_2x1,
@@ -134,6 +173,8 @@ Item {
         "resource_ram_pill": component_resource_ram_pill,
         "resource_disk_pill": component_resource_disk_pill,
         "resource_fill_cards": component_resource_fill_cards,
+        "resource_columns": component_resource_columns,
+        "resource_tiles": component_resource_tiles,
         "resource_nothing_disk": component_resource_nothing_disk,
         "resource_nothing_cpu": component_resource_nothing_cpu,
         "resource_nothing_ram": component_resource_nothing_ram
@@ -249,6 +290,45 @@ Item {
         id: component_clock_ios
 
         IosClockWidget {
+            screenWidth: delegateRoot.screenWidth
+            screenHeight: delegateRoot.screenHeight
+            scaledScreenWidth: delegateRoot.screenWidth
+            scaledScreenHeight: delegateRoot.screenHeight
+            wallpaperScale: delegateRoot.wallpaperScale
+        }
+
+    }
+
+    Component {
+        id: component_clock_ios_tile
+
+        IosTileClockWidget {
+            screenWidth: delegateRoot.screenWidth
+            screenHeight: delegateRoot.screenHeight
+            scaledScreenWidth: delegateRoot.screenWidth
+            scaledScreenHeight: delegateRoot.screenHeight
+            wallpaperScale: delegateRoot.wallpaperScale
+        }
+
+    }
+
+    Component {
+        id: component_clock_ios_analog
+
+        IosAnalogClockWidget {
+            screenWidth: delegateRoot.screenWidth
+            screenHeight: delegateRoot.screenHeight
+            scaledScreenWidth: delegateRoot.screenWidth
+            scaledScreenHeight: delegateRoot.screenHeight
+            wallpaperScale: delegateRoot.wallpaperScale
+        }
+
+    }
+
+    Component {
+        id: component_clock_california
+
+        CaliforniaClockWidget {
             screenWidth: delegateRoot.screenWidth
             screenHeight: delegateRoot.screenHeight
             scaledScreenWidth: delegateRoot.screenWidth
@@ -408,6 +488,240 @@ Item {
         id: component_triple_ring_clock
 
         TripleRingClockWidget {
+            screenWidth: delegateRoot.screenWidth
+            screenHeight: delegateRoot.screenHeight
+            scaledScreenWidth: delegateRoot.screenWidth
+            scaledScreenHeight: delegateRoot.screenHeight
+            wallpaperScale: delegateRoot.wallpaperScale
+        }
+
+    }
+
+    Component {
+        id: component_clock_type_weight
+
+        WeightClockWidget {
+            screenWidth: delegateRoot.screenWidth
+            screenHeight: delegateRoot.screenHeight
+            scaledScreenWidth: delegateRoot.screenWidth
+            scaledScreenHeight: delegateRoot.screenHeight
+            wallpaperScale: delegateRoot.wallpaperScale
+        }
+
+    }
+
+    Component {
+        id: component_clock_type_width
+
+        WidthClockWidget {
+            screenWidth: delegateRoot.screenWidth
+            screenHeight: delegateRoot.screenHeight
+            scaledScreenWidth: delegateRoot.screenWidth
+            scaledScreenHeight: delegateRoot.screenHeight
+            wallpaperScale: delegateRoot.wallpaperScale
+        }
+
+    }
+
+    Component {
+        id: component_clock_type_stack
+
+        StackClockWidget {
+            screenWidth: delegateRoot.screenWidth
+            screenHeight: delegateRoot.screenHeight
+            scaledScreenWidth: delegateRoot.screenWidth
+            scaledScreenHeight: delegateRoot.screenHeight
+            wallpaperScale: delegateRoot.wallpaperScale
+        }
+
+    }
+
+    Component {
+        id: component_clock_numeral
+
+        NumeralClockWidget {
+            screenWidth: delegateRoot.screenWidth
+            screenHeight: delegateRoot.screenHeight
+            scaledScreenWidth: delegateRoot.screenWidth
+            scaledScreenHeight: delegateRoot.screenHeight
+            wallpaperScale: delegateRoot.wallpaperScale
+        }
+
+    }
+
+    Component {
+        id: component_todo_focus
+
+        TodoFocusWidget {
+            screenWidth: delegateRoot.screenWidth
+            screenHeight: delegateRoot.screenHeight
+            scaledScreenWidth: delegateRoot.screenWidth
+            scaledScreenHeight: delegateRoot.screenHeight
+            wallpaperScale: delegateRoot.wallpaperScale
+        }
+
+    }
+
+    Component {
+        id: component_todo_board
+
+        TodoBoardWidget {
+            screenWidth: delegateRoot.screenWidth
+            screenHeight: delegateRoot.screenHeight
+            scaledScreenWidth: delegateRoot.screenWidth
+            scaledScreenHeight: delegateRoot.screenHeight
+            wallpaperScale: delegateRoot.wallpaperScale
+        }
+
+    }
+
+    Component {
+        id: component_todo_column
+
+        TodoColumnWidget {
+            screenWidth: delegateRoot.screenWidth
+            screenHeight: delegateRoot.screenHeight
+            scaledScreenWidth: delegateRoot.screenWidth
+            scaledScreenHeight: delegateRoot.screenHeight
+            wallpaperScale: delegateRoot.wallpaperScale
+        }
+
+    }
+
+    Component {
+        id: component_timer_pomodoro
+
+        PomodoroWidget {
+            screenWidth: delegateRoot.screenWidth
+            screenHeight: delegateRoot.screenHeight
+            scaledScreenWidth: delegateRoot.screenWidth
+            scaledScreenHeight: delegateRoot.screenHeight
+            wallpaperScale: delegateRoot.wallpaperScale
+        }
+
+    }
+
+    Component {
+        id: component_timer_stopwatch
+
+        StopwatchWidget {
+            screenWidth: delegateRoot.screenWidth
+            screenHeight: delegateRoot.screenHeight
+            scaledScreenWidth: delegateRoot.screenWidth
+            scaledScreenHeight: delegateRoot.screenHeight
+            wallpaperScale: delegateRoot.wallpaperScale
+        }
+
+    }
+
+    Component {
+        id: component_timer_countdown
+
+        CountdownWidget {
+            screenWidth: delegateRoot.screenWidth
+            screenHeight: delegateRoot.screenHeight
+            scaledScreenWidth: delegateRoot.screenWidth
+            scaledScreenHeight: delegateRoot.screenHeight
+            wallpaperScale: delegateRoot.wallpaperScale
+        }
+
+    }
+
+    Component {
+        id: component_translator_widget
+
+        TranslatorWidget {
+            screenWidth: delegateRoot.screenWidth
+            screenHeight: delegateRoot.screenHeight
+            scaledScreenWidth: delegateRoot.screenWidth
+            scaledScreenHeight: delegateRoot.screenHeight
+            wallpaperScale: delegateRoot.wallpaperScale
+        }
+
+    }
+
+    Component {
+        id: component_water_glass
+
+        WaterGlassWidget {
+            screenWidth: delegateRoot.screenWidth
+            screenHeight: delegateRoot.screenHeight
+            scaledScreenWidth: delegateRoot.screenWidth
+            scaledScreenHeight: delegateRoot.screenHeight
+            wallpaperScale: delegateRoot.wallpaperScale
+        }
+
+    }
+
+    Component {
+        id: component_phone_key
+
+        PhoneKeyWidget {
+            screenWidth: delegateRoot.screenWidth
+            screenHeight: delegateRoot.screenHeight
+            scaledScreenWidth: delegateRoot.screenWidth
+            scaledScreenHeight: delegateRoot.screenHeight
+            wallpaperScale: delegateRoot.wallpaperScale
+        }
+
+    }
+
+    Component {
+        id: component_phone_deck
+
+        PhoneDeckWidget {
+            screenWidth: delegateRoot.screenWidth
+            screenHeight: delegateRoot.screenHeight
+            scaledScreenWidth: delegateRoot.screenWidth
+            scaledScreenHeight: delegateRoot.screenHeight
+            wallpaperScale: delegateRoot.wallpaperScale
+        }
+
+    }
+
+    Component {
+        id: component_phone_tower
+
+        PhoneTowerWidget {
+            screenWidth: delegateRoot.screenWidth
+            screenHeight: delegateRoot.screenHeight
+            scaledScreenWidth: delegateRoot.screenWidth
+            scaledScreenHeight: delegateRoot.screenHeight
+            wallpaperScale: delegateRoot.wallpaperScale
+        }
+
+    }
+
+    Component {
+        id: component_send_drop
+
+        SendDropWidget {
+            screenWidth: delegateRoot.screenWidth
+            screenHeight: delegateRoot.screenHeight
+            scaledScreenWidth: delegateRoot.screenWidth
+            scaledScreenHeight: delegateRoot.screenHeight
+            wallpaperScale: delegateRoot.wallpaperScale
+        }
+
+    }
+
+    Component {
+        id: component_session_grid
+
+        SessionGridWidget {
+            screenWidth: delegateRoot.screenWidth
+            screenHeight: delegateRoot.screenHeight
+            scaledScreenWidth: delegateRoot.screenWidth
+            scaledScreenHeight: delegateRoot.screenHeight
+            wallpaperScale: delegateRoot.wallpaperScale
+        }
+
+    }
+
+    Component {
+        id: component_clock_duo
+
+        DuoClockWidget {
             screenWidth: delegateRoot.screenWidth
             screenHeight: delegateRoot.screenHeight
             scaledScreenWidth: delegateRoot.screenWidth
@@ -846,6 +1160,97 @@ Item {
     }
 
     Component {
+        id: component_calendar_date_stack
+
+        DateStackWidget {
+            screenWidth: delegateRoot.screenWidth
+            screenHeight: delegateRoot.screenHeight
+            scaledScreenWidth: delegateRoot.screenWidth
+            scaledScreenHeight: delegateRoot.screenHeight
+            wallpaperScale: delegateRoot.wallpaperScale
+        }
+
+    }
+
+    Component {
+        id: component_calendar_date_banner
+
+        DateBannerWidget {
+            screenWidth: delegateRoot.screenWidth
+            screenHeight: delegateRoot.screenHeight
+            scaledScreenWidth: delegateRoot.screenWidth
+            scaledScreenHeight: delegateRoot.screenHeight
+            wallpaperScale: delegateRoot.wallpaperScale
+        }
+
+    }
+
+    Component {
+        id: component_calendar_week_strip
+
+        WeekStripWidget {
+            screenWidth: delegateRoot.screenWidth
+            screenHeight: delegateRoot.screenHeight
+            scaledScreenWidth: delegateRoot.screenWidth
+            scaledScreenHeight: delegateRoot.screenHeight
+            wallpaperScale: delegateRoot.wallpaperScale
+        }
+
+    }
+
+    Component {
+        id: component_calendar_week_agenda
+
+        WeekAgendaWidget {
+            screenWidth: delegateRoot.screenWidth
+            screenHeight: delegateRoot.screenHeight
+            scaledScreenWidth: delegateRoot.screenWidth
+            scaledScreenHeight: delegateRoot.screenHeight
+            wallpaperScale: delegateRoot.wallpaperScale
+        }
+
+    }
+
+    Component {
+        id: component_calendar_month_tall
+
+        MonthTallWidget {
+            screenWidth: delegateRoot.screenWidth
+            screenHeight: delegateRoot.screenHeight
+            scaledScreenWidth: delegateRoot.screenWidth
+            scaledScreenHeight: delegateRoot.screenHeight
+            wallpaperScale: delegateRoot.wallpaperScale
+        }
+
+    }
+
+    Component {
+        id: component_calendar_date_type
+
+        DateTypeWidget {
+            screenWidth: delegateRoot.screenWidth
+            screenHeight: delegateRoot.screenHeight
+            scaledScreenWidth: delegateRoot.screenWidth
+            scaledScreenHeight: delegateRoot.screenHeight
+            wallpaperScale: delegateRoot.wallpaperScale
+        }
+
+    }
+
+    Component {
+        id: component_calendar_date_shapes
+
+        DateShapesWidget {
+            screenWidth: delegateRoot.screenWidth
+            screenHeight: delegateRoot.screenHeight
+            scaledScreenWidth: delegateRoot.screenWidth
+            scaledScreenHeight: delegateRoot.screenHeight
+            wallpaperScale: delegateRoot.wallpaperScale
+        }
+
+    }
+
+    Component {
         id: component_calendar_upcoming_3days
 
         CalendarUpcoming3DaysWidget {
@@ -862,6 +1267,45 @@ Item {
         id: component_photo
 
         PhotoWidget {
+            screenWidth: delegateRoot.screenWidth
+            screenHeight: delegateRoot.screenHeight
+            scaledScreenWidth: delegateRoot.screenWidth
+            scaledScreenHeight: delegateRoot.screenHeight
+            wallpaperScale: delegateRoot.wallpaperScale
+        }
+
+    }
+
+    Component {
+        id: component_photo_plain_1x1
+
+        PlainPhoto1x1Widget {
+            screenWidth: delegateRoot.screenWidth
+            screenHeight: delegateRoot.screenHeight
+            scaledScreenWidth: delegateRoot.screenWidth
+            scaledScreenHeight: delegateRoot.screenHeight
+            wallpaperScale: delegateRoot.wallpaperScale
+        }
+
+    }
+
+    Component {
+        id: component_photo_plain_2x1
+
+        PlainPhoto2x1Widget {
+            screenWidth: delegateRoot.screenWidth
+            screenHeight: delegateRoot.screenHeight
+            scaledScreenWidth: delegateRoot.screenWidth
+            scaledScreenHeight: delegateRoot.screenHeight
+            wallpaperScale: delegateRoot.wallpaperScale
+        }
+
+    }
+
+    Component {
+        id: component_photo_plain_1x2
+
+        PlainPhoto1x2Widget {
             screenWidth: delegateRoot.screenWidth
             screenHeight: delegateRoot.screenHeight
             scaledScreenWidth: delegateRoot.screenWidth
@@ -1145,6 +1589,58 @@ Item {
     }
 
     Component {
+        id: component_media_poster
+
+        PosterMediaWidget {
+            screenWidth: delegateRoot.screenWidth
+            screenHeight: delegateRoot.screenHeight
+            scaledScreenWidth: delegateRoot.screenWidth
+            scaledScreenHeight: delegateRoot.screenHeight
+            wallpaperScale: delegateRoot.wallpaperScale
+        }
+
+    }
+
+    Component {
+        id: component_media_deck
+
+        DeckMediaWidget {
+            screenWidth: delegateRoot.screenWidth
+            screenHeight: delegateRoot.screenHeight
+            scaledScreenWidth: delegateRoot.screenWidth
+            scaledScreenHeight: delegateRoot.screenHeight
+            wallpaperScale: delegateRoot.wallpaperScale
+        }
+
+    }
+
+    Component {
+        id: component_media_halo
+
+        HaloMediaWidget {
+            screenWidth: delegateRoot.screenWidth
+            screenHeight: delegateRoot.screenHeight
+            scaledScreenWidth: delegateRoot.screenWidth
+            scaledScreenHeight: delegateRoot.screenHeight
+            wallpaperScale: delegateRoot.wallpaperScale
+        }
+
+    }
+
+    Component {
+        id: component_media_cover
+
+        CoverMediaWidget {
+            screenWidth: delegateRoot.screenWidth
+            screenHeight: delegateRoot.screenHeight
+            scaledScreenWidth: delegateRoot.screenWidth
+            scaledScreenHeight: delegateRoot.screenHeight
+            wallpaperScale: delegateRoot.wallpaperScale
+        }
+
+    }
+
+    Component {
         id: component_compact_media
 
         CompactMediaWidget {
@@ -1249,6 +1745,32 @@ Item {
     }
 
     Component {
+        id: component_resource_columns
+
+        ResourceColumnsWidget {
+            screenWidth: delegateRoot.screenWidth
+            screenHeight: delegateRoot.screenHeight
+            scaledScreenWidth: delegateRoot.screenWidth
+            scaledScreenHeight: delegateRoot.screenHeight
+            wallpaperScale: delegateRoot.wallpaperScale
+        }
+
+    }
+
+    Component {
+        id: component_resource_tiles
+
+        ResourceTilesWidget {
+            screenWidth: delegateRoot.screenWidth
+            screenHeight: delegateRoot.screenHeight
+            scaledScreenWidth: delegateRoot.screenWidth
+            scaledScreenHeight: delegateRoot.screenHeight
+            wallpaperScale: delegateRoot.wallpaperScale
+        }
+
+    }
+
+    Component {
         id: component_resource_fill_cards
 
         ResourceFillCardsWidget {
@@ -1303,6 +1825,12 @@ Item {
     FadeLoader {
         id: widgetLoader
 
+        // Whether the widget takes `paused` (extension widgets may not). Read once per
+        // item: an `in` test inside the Binding's `when` would read the very property
+        // that Binding writes.
+        property bool takesPause: false
+        onItemChanged: takesPause = item !== null && ("paused" in item)
+
         // Which widgets are built at all. Off the lock that is everything but
         // the lock-only ones; on it - a real lock, or Edit Mode's Lockscreen
         // tab, which draws the same layout with no lock session behind it -
@@ -1333,6 +1861,13 @@ Item {
                 };
             }
             when: widgetLoader.status == Loader.Ready
+        }
+
+        Binding {
+            target: widgetLoader.item
+            property: "paused"
+            value: delegateRoot.widgetsPaused
+            when: widgetLoader.status == Loader.Ready && widgetLoader.takesPause
         }
 
         Binding {

@@ -43,7 +43,7 @@ Item {
 
         property color pillColor: GlobalStates.sidebarRightOpen 
             ? (mouseArea.containsMouse ? Appearance.colors.colLayer4Hover : "transparent")
-            : (mouseArea.containsMouse ? widgetPalette.colContainerHover : widgetPalette.colContainer)
+            : (mouseArea.containsMouse ? widgetPalette.colBackgroundHover : widgetPalette.colBackground)
 
         property color borderColor: GlobalStates.sidebarRightOpen 
             ? widgetPalette.colBackground
@@ -52,7 +52,7 @@ Item {
         property real borderWidth: GlobalStates.sidebarRightOpen ? 1.5 : 0
         property real dashLength: GlobalStates.sidebarRightOpen ? 6 : 0
         property real gapLength: GlobalStates.sidebarRightOpen ? 4 : 0
-        property real radius: Config.options.bar.barGroupStyle === 1 ? Appearance.rounding.windowRounding : Appearance.rounding.full
+        property real radius: (typeof rootItem !== "undefined" ? rootItem.groupStyle : Config.options.bar.barGroupStyle) === 1 ? Appearance.rounding.windowRounding : Appearance.rounding.full
         property real dashOffset: 0
 
         implicitWidth: root.vertical ? Appearance.sizes.verticalBarWidth - 8 : Math.max(0, flow.implicitWidth - flow.itemSpacing) + 10
@@ -397,6 +397,7 @@ Item {
                         running: iconDriver.countdownRunning
                         paused: iconDriver.countdownPaused
                         finished: iconDriver.countdownFinished
+                        progress: iconDriver.countdownProgress
                     }
                 }
             }

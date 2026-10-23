@@ -104,6 +104,8 @@ ShellRoot {
             RemindersSync.enabled; // Two-way Microsoft To Do sync
         if (Config.options?.clockApp?.phoneAlarm?.enable ?? true)
             PhoneAlarmService.enabled; // Mirrors the phone's next alarm over ADB
+        if (Config.options?.health?.enable ?? true)
+            HealthService.enabled; // Runs health_watch: failed services, crashes, new errors, disks
         const timetable = Config.options?.calendar?.timetable;
         const hasCalendarSubscriptions = (timetable?.imports?.enable ?? false) || ((timetable?.subscriptions ?? []).length > 0);
         if (hasCalendarSubscriptions)
@@ -120,24 +122,25 @@ ShellRoot {
             BirthdaysService.enabled;
         if (Config.options?.googleDrive?.enabled)
             GoogleDriveService.configured;
-        if (Config.options?.appStats?.enable ?? true)
+        if (Config.options?.appStats?.enable ?? false)
             AppStats.stateDir; // Instantiate only when usage tracking is enabled
-        if ((Config.options?.appStats?.enable ?? true) && (Config.options?.screenTime?.enable ?? true))
+        if ((Config.options?.appStats?.enable ?? false) && (Config.options?.screenTime?.enable ?? true))
             ScreenTimeLimits.enabled; // Daily limits: counts focused time and opens the block screen
         if (Config.options?.notes?.enable ?? true)
             NotesService.ready; // Touch singleton only when the notes feature is enabled
-        if (Config.options?.modes?.enable ?? true)
+        if (Config.options?.modes?.enable ?? false)
             Modes.ready; // Touch singleton only when modes are enabled
         if (Config.options?.tiling?.enable)
             TilingAssistant.enabled; // Touch singleton: watches for window drags, does nothing while disabled
         if (Config.options?.launcher?.typeToSearch?.enable ?? false)
             TypeToSearch.armed; // Register binds only when type-to-search is enabled
         StaleFocusRelease.active; // Drops the keyboard from a window silently sent off screen
+        ClosedWindows.count; // Registers the reopen bind and keeps the closed-window stack; idle while disabled
         if (Config.options?.interactions?.touchGestures?.enable ?? true)
             TouchGestureService.enabled; // Start the touch helper only when gestures are enabled
         TouchpadGestures.enabled; // Keeps the compositor's touchpad gesture snapshot in step with the config
-        if (Config.options?.bar?.workspaces?.autoCompact ?? false)
-            WorkspaceCompactor.enabled; // Start the compactor only when auto-compact is enabled
+        if (Config.options?.bar?.workspaces?.arranger?.autoCloseGaps ?? false)
+            WorkspaceArranger.enabled; // Start the arranger's watcher only when auto-close gaps is enabled
         // IconThemes is loaded by the settings page when its data is actually needed.
         if (Config.options?.dictation?.enabled)
             DictationService.installed; // Touch singleton: registers the dictation keybind, whose surfaces are all optional

@@ -148,6 +148,60 @@ StyledFlickable {
             onSelected: value => Config.options.background.desktopIcons.iconBackground = value
         }
 
+        EditPanelSectionLabel {
+            text: Translation.tr("App groups")
+        }
+        EditOptionChips {
+            Layout.fillWidth: true
+            label: Translation.tr("Group shape")
+            currentValue: root.options.groupShape ?? "auto"
+            options: [
+                { "displayName": Translation.tr("Auto"), "value": "auto" },
+                { "displayName": Translation.tr("Rounded"), "value": "rounded", "icon": "rounded_corner" },
+                { "displayName": Translation.tr("Squircle"), "value": "squircle", "icon": "square" },
+                { "displayName": Translation.tr("Circle"), "value": "circle", "icon": "circle" },
+                { "displayName": Translation.tr("Cookie"), "value": "cookie", "icon": "cookie" },
+                { "displayName": Translation.tr("Clover"), "value": "clover", "icon": "filter_vintage" },
+            ]
+            onSelected: value => Config.options.background.desktopIcons.groupShape = value
+        }
+        EditOptionChips {
+            Layout.fillWidth: true
+            label: Translation.tr("Group colour")
+            currentValue: root.options.groupColor ?? "auto"
+            options: [
+                { "displayName": Translation.tr("Auto"), "value": "auto" },
+                { "displayName": Translation.tr("Primary"), "value": "primary" },
+                { "displayName": Translation.tr("Secondary"), "value": "secondary" },
+                { "displayName": Translation.tr("Tertiary"), "value": "tertiary" },
+                { "displayName": Translation.tr("Neutral"), "value": "neutral" },
+                { "displayName": Translation.tr("Glass"), "value": "glass", "icon": "blur_on" },
+            ]
+            onSelected: value => Config.options.background.desktopIcons.groupColor = value
+        }
+        EditOptionChips {
+            Layout.fillWidth: true
+            label: Translation.tr("Icon mask")
+            currentValue: root.options.groupIconMask ?? "auto"
+            options: [
+                { "displayName": Translation.tr("Auto"), "value": "auto" },
+                { "displayName": Translation.tr("None"), "value": "none" },
+                { "displayName": Translation.tr("Rounded"), "value": "rounded", "icon": "rounded_corner" },
+                { "displayName": Translation.tr("Squircle"), "value": "squircle", "icon": "square" },
+                { "displayName": Translation.tr("Circle"), "value": "circle", "icon": "circle" },
+            ]
+            onSelected: value => Config.options.background.desktopIcons.groupIconMask = value
+        }
+        StyledText {
+            Layout.fillWidth: true
+            Layout.leftMargin: 6
+            Layout.rightMargin: 6
+            text: Translation.tr("Extend a group from its right-click menu to show three apps big and the rest in a small group. A group can also keep its own shape, colour and icon mask there. Auto clips the icons to the group's shape.")
+            font.pixelSize: Appearance.font.pixelSize.smaller
+            color: Appearance.colors.colSubtext
+            wrapMode: Text.Wrap
+        }
+
         EditPanelRow {
             Layout.fillWidth: true
             Layout.topMargin: 4
@@ -162,12 +216,22 @@ StyledFlickable {
         EditPanelRow {
             Layout.fillWidth: true
             first: false
-            last: true
+            last: false
             symbol: "notifications"
             title: Translation.tr("Notification count")
             trailingKind: "switch"
             switchChecked: root.options.notificationBadges
             onActivated: Config.options.background.desktopIcons.notificationBadges = !root.options.notificationBadges
+        }
+        EditPanelRow {
+            Layout.fillWidth: true
+            first: false
+            last: true
+            symbol: "arrow_outward"
+            title: Translation.tr("Link badge")
+            trailingKind: "switch"
+            switchChecked: root.options.linkBadges ?? true
+            onActivated: Config.options.background.desktopIcons.linkBadges = !(root.options.linkBadges ?? true)
         }
     }
 }

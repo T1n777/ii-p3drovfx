@@ -1,6 +1,7 @@
 import QtQuick
 import qs
 import qs.modules.common
+import qs.modules.common.functions
 import qs.modules.ii.bar.shared
 
 // Computes radius and color values for a BarGroup.
@@ -18,7 +19,8 @@ QtObject {
     required property var activeTheme       // from BarThemes
     required property string widgetId
 
-    readonly property int barGroupStyle:     Config.options.bar.barGroupStyle
+    // Set by BarComponent (Settings' preview can try another style on).
+    property int barGroupStyle: Config.options.bar.barGroupStyle
     readonly property int barBackgroundStyle: Config.options.bar.barBackgroundStyle
 
     property bool hasActiveLeftNeighbor: false
@@ -43,9 +45,7 @@ QtObject {
         if (Config.options.bar.expressiveColors) return activeTheme.componentBackground;
         if (Config.options.bar.expressiveGroupColor && (barGroupStyle === 0 || barGroupStyle === 1))
             return Appearance.colors.colPrimaryContainer;
-        if (barGroupStyle === 0) return Appearance.colors.colLayer1;
-        if (barGroupStyle === 1 && barBackgroundStyle === 1) return Appearance.colors.colLayer1;
-        if (barGroupStyle === 1) return Appearance.m3colors.m3surfaceContainerLow;
+        if (barGroupStyle === 0 || barGroupStyle === 1) return Appearance.colors.colLayer1;
         return "transparent";
     }
 

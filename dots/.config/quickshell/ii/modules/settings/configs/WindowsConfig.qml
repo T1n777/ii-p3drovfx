@@ -183,6 +183,43 @@ Item {
                 }
             }
 
+            // Hyprland's own blur, for windows and shell surfaces alike.
+            ContentSubsection {
+                title: Translation.tr("Compositor blur")
+                icon: "blur_on"
+                Layout.fillWidth: true
+
+                ConfigSelectionArray {
+                    currentValue: windowsRoot.appearance.blur.mode ?? "live"
+                    onSelected: newValue => windowsRoot.appearance.blur.mode = newValue
+                    options: [
+                        { displayName: Translation.tr("Live"), icon: "blur_on", value: "live",
+                          tooltip: Translation.tr("Blur whatever is behind, windows included. The heaviest on the GPU: every animation behind a blurred surface blurs it again") },
+                        { displayName: Translation.tr("Wallpaper only"), icon: "wallpaper", value: "xray",
+                          tooltip: Translation.tr("Blur only the wallpaper, computed once and reused. Glass stays, animations stay smooth") },
+                        { displayName: Translation.tr("Off"), icon: "blur_off", value: "off",
+                          tooltip: Translation.tr("No compositor blur anywhere, for the lightest rendering") }
+                    ]
+                }
+            }
+
+            ContentSubsection {
+                title: Translation.tr("App windows")
+                icon: "select_window"
+                Layout.fillWidth: true
+
+                ConfigSelectionArray {
+                    currentValue: windowsRoot.appearance.blur.opaqueWindows ?? false
+                    onSelected: newValue => windowsRoot.appearance.blur.opaqueWindows = newValue
+                    options: [
+                        { displayName: Translation.tr("Per app"), icon: "opacity", value: false,
+                          tooltip: Translation.tr("Each app keeps the opacity your window rules give it") },
+                        { displayName: Translation.tr("Opaque"), icon: "rectangle", value: true,
+                          tooltip: Translation.tr("Every window fully opaque, over any opacity rule. Nothing behind them is drawn or blurred") }
+                    ]
+                }
+            }
+
             ConfigSlider {
                 visible: windowsRoot.transparencyMode === "custom"
                 buttonIcon: "blur_on"
@@ -219,6 +256,34 @@ Item {
                 visible: windowsRoot.appearance.blurSize >= 30
                 materialIcon: "battery_alert"
                 text: Translation.tr("Heavy blur effects can significantly impact battery life and performance on weaker GPUs.")
+            }
+
+            // Hyprland's ignore_alpha: it decides *where* blur applies, so it sits
+            // with the blur size rather than among the advanced options.
+            ConfigSlider {
+                id: blurThresholdSlider
+                buttonIcon: "gradient"
+                text: Translation.tr("Blur threshold")
+                value: windowsRoot.appearance.ignoreAlpha
+                from: 0
+                to: 1
+                stepSize: 0.001
+                snapMode: Slider.NoSnap
+                stopIndicatorValues: []
+                usePercentTooltip: false
+                badgeText: Translation.tr("Above %1%").arg((value * 100).toFixed(1))
+                tooltipContent: Translation.tr("Only parts more than %1% opaque are blurred").arg((value * 100).toFixed(1))
+                onMoved: windowsRoot.appearance.ignoreAlpha = Math.round(value * 1000) / 1000
+                StyledToolTip {
+                    text: Translation.tr("Blur is applied only behind parts of the shell that are more opaque than this. Lower it to blur more transparent surfaces; raise it to keep blur off soft shadows and edges. Above a surface's own opacity, that surface is not blurred at all.")
+                }
+            }
+
+            NoticeBox {
+                Layout.fillWidth: true
+                visible: Math.round(blurThresholdSlider.value * 100) <= 30
+                materialIcon: "info"
+                text: Translation.tr("A low threshold also blurs shadows and soft edges, which can show as a frosted halo around panels and widgets.")
             }
 
             ConfigSwitch {
@@ -567,6 +632,38 @@ Item {
                     .arg(WindowSwitcher.searchConflicts.map(key => key.toUpperCase()).join(", "))
                 visible: windowsRoot.switcher.enable && windowsRoot.switcher.searchAnywhere
                     && WindowSwitcher.searchConflicts.length > 0
+            }
+        }
+
+        ContentSection {
+            title: Translation.tr("Reopen closed windows")
+            icon: "history"
+
+            KeyboardShortcutBox {
+                Layout.fillWidth: true
+                text: Translation.tr("Starts the app of the last closed window again, on the workspace it was on and, if it floated, at its size and place. Press again for the one before")
+                keys: ["Super", "Shift", "Ctrl", "Q"]
+            }
+
+            ConfigSwitch {
+                buttonIcon: "history"
+                text: Translation.tr("Remember closed windows")
+                checked: Config.options.reopenClosedWindow.enable
+                onCheckedChanged: Config.options.reopenClosedWindow.enable = checked
+                StyledToolTip {
+                    text: Translation.tr("Kept in memory only and forgotten when the shell restarts: a command line can hold private paths or tokens")
+                }
+            }
+
+            ConfigSpinBox {
+                icon: "stacks"
+                text: Translation.tr("Windows remembered")
+                enabled: Config.options.reopenClosedWindow.enable
+                value: Config.options.reopenClosedWindow.depth
+                from: 1
+                to: 50
+                stepSize: 1
+                onValueChanged: Config.options.reopenClosedWindow.depth = value
             }
         }
 

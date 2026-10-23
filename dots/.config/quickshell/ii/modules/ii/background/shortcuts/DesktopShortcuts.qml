@@ -5,11 +5,33 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import Quickshell.Hyprland
+import Qt.labs.folderlistmodel
+import qs
 import qs.services
 import qs.modules.common
 
 Singleton {
     id: root
+
+    readonly property string desktopFolder: Directories.desktopPath
+    property var pendingPlacements: ({})
+    // Set by the menu's New folder / New document: the item the scan places
+    // next is announced so the layer opens its rename at once.
+    property var renameOnCreate: null
+    signal createdForRename(string screenName, string itemId)
+    // Something on the desktop was opened: the layers drop their selection,
+    // so the opened icon is not left highlighted under the new window.
+    signal launched(string itemId)
+    // The icons' hover and selection plates, per screen, in screen pixels.
+    // The layer publishes them and the wallpaper surface draws them: the
+    // widgets surface is compositor-blurred behind anything translucent.
+    property var plates: ({})
+    function setPlates(screenName, list) {
+        const next = Object.assign({}, root.plates);
+        next[screenName] = list;
+        root.plates = next;
+    }
+    property var actionQueue: []
 
     // Decode only when persisted state changes, not on pointer movement or per icon.
     readonly property var screens: {
@@ -24,6 +46,177 @@ Singleton {
     property string error: ""
     property var importQueue: []
     property var currentImport: null
+    // Folder path → up to four images drawn on its icon (Dolphin's folder
+    // thumbnails), from the last scan. Not persisted.
+    property var folderPreviews: ({})
+    // Desktop paths that are links (what a drop makes), from the last scan:
+    // their icons wear a shortcut arrow. Not persisted.
+    property var linkedPaths: ({})
+    // File path → its thumbnail (a PDF's page, a video's frame, a photo),
+    // drawn in place of the type icon as a file manager does. Not persisted.
+    property var fileThumbnails: ({})
+    // "path|modified" of the files the thumbnailer already tried: a file it
+    // cannot read is asked again only once it changes.
+    property var thumbnailsTried: ({})
+
+    // ── Desktop Folder Watcher & Scanner ───────────────────────────────────
+    FolderListModel {
+        id: desktopWatcher
+        folder: root.desktopFolder ? ("file://" + root.desktopFolder) : ""
+        showDirs: true
+        showFiles: true
+        showHidden: false
+        showDotAndDotDot: false
+        onCountChanged: scanDebounce.restart()
+        onRowsInserted: scanDebounce.restart()
+        onRowsRemoved: scanDebounce.restart()
+        onDataChanged: scanDebounce.restart()
+    }
+
+    Timer {
+        id: scanDebounce
+        interval: 150
+        onTriggered: root.scanDesktop()
+    }
+
+    function scanDesktop() {
+        if (!Persistent.ready)
+            return;
+        if (scanner.running)
+            return;
+        scanner.command = ["/usr/bin/python3", Directories.scriptPath + "/desktop_shortcuts.py",
+            "scan", root.desktopFolder];
+        scanner.running = true;
+    }
+
+    Process {
+        id: scanner
+        stdout: StdioCollector {
+            onStreamFinished: {
+                try {
+                    const result = JSON.parse(text);
+                    if (Array.isArray(result.items))
+                        root.syncFromDisk(result.items);
+                } catch (error) {
+                    console.warn("[DesktopShortcuts] Scan parse error:", error);
+                }
+            }
+        }
+        onExited: (exitCode, exitStatus) => {
+            scanner.command = [];
+        }
+    }
+
+    // The thumbnails a scan found missing are made after it, off the scan's
+    // path: the icons show at once and their pictures follow.
+    function requestThumbnails(diskItems) {
+        const wanted = diskItems.filter(d => d.type === "file" && !d.thumbnail && d.path
+            && !root.thumbnailsTried[d.path + "|" + d.modified]);
+        if (wanted.length === 0)
+            return;
+        const tried = Object.assign({}, root.thumbnailsTried);
+        for (const d of wanted)
+            tried[d.path + "|" + d.modified] = true;
+        root.thumbnailsTried = tried;
+        if (thumbnailer.running) {
+            thumbnailer.again = true;
+            return;
+        }
+        thumbnailer.command = ["/usr/bin/python3", Directories.scriptPath + "/desktop_shortcuts.py",
+            "thumbnails", root.desktopFolder];
+        thumbnailer.running = true;
+    }
+
+    Process {
+        id: thumbnailer
+        property bool again: false
+        stdout: StdioCollector {
+            onStreamFinished: {
+                try {
+                    const made = JSON.parse(text).thumbnails ?? {};
+                    if (Object.keys(made).length > 0)
+                        root.fileThumbnails = Object.assign({}, root.fileThumbnails, made);
+                } catch (error) {
+                    console.warn("[DesktopShortcuts] Thumbnail parse error:", error);
+                }
+            }
+        }
+        onExited: (exitCode, exitStatus) => {
+            if (thumbnailer.again) {
+                thumbnailer.again = false;
+                thumbnailer.running = true;
+            }
+        }
+    }
+
+    // ── Action Queue & Worker ──────────────────────────────────────────────
+    Item {
+        id: actionRunner
+        function run(cmd) {
+            root.actionQueue.push(cmd);
+            actionRunner.processNext();
+        }
+        function processNext() {
+            if (actionProc.running || !root.actionQueue.length)
+                return;
+            const nextCmd = root.actionQueue.shift();
+            actionProc.command = nextCmd;
+            actionProc.running = true;
+        }
+    }
+
+    Process {
+        id: actionProc
+        stdout: StdioCollector {
+            onStreamFinished: {
+                try {
+                    const res = JSON.parse(text);
+                    if (res && res.oldPath && res.newPath) {
+                        const curScreens = Object.assign({}, root.screens);
+                        let changed = false;
+                        for (const s of Object.keys(curScreens)) {
+                            const list = (curScreens[s] || []).map(it => {
+                                if (it.path === res.oldPath || it.id === res.oldPath || (it.id && it.id.endsWith(res.oldPath))) {
+                                    changed = true;
+                                    return Object.assign({}, it, {
+                                        id: res.item ? res.item.id : ("file:" + res.newPath),
+                                        path: res.newPath,
+                                        fileName: res.item ? res.item.fileName : res.newPath.substring(res.newPath.lastIndexOf("/") + 1),
+                                        name: res.item ? res.item.name : it.name
+                                    });
+                                }
+                                return it;
+                            });
+                            if (changed)
+                                curScreens[s] = list;
+                        }
+                        if (changed)
+                            root.writeAll(curScreens);
+                    } else if (res && res.item && res.item.path) {
+                        const fallback = root.pendingPlacements["__new_item__"];
+                        if (res.item.name && root.pendingPlacements[res.item.name]) {
+                            root.registerPlacement(res.item.path,
+                                root.pendingPlacements[res.item.name].screen,
+                                root.pendingPlacements[res.item.name].x,
+                                root.pendingPlacements[res.item.name].y);
+                        } else if (fallback) {
+                            root.registerPlacement(res.item.path,
+                                fallback.screen,
+                                fallback.x,
+                                fallback.y);
+                        }
+                    }
+                } catch (e) {}
+            }
+        }
+        onExited: (exitCode, exitStatus) => {
+            actionProc.command = [];
+            Qt.callLater(() => {
+                root.scanDesktop();
+                actionRunner.processNext();
+            });
+        }
+    }
 
     // ── Grid ───────────────────────────────────────────────────────────────
     // One lattice for everything that places an icon. The cell is the
@@ -52,6 +245,28 @@ Singleton {
     }
     function setHidden(value) {
         Config.options.background.desktopIcons.hidden = value;
+    }
+
+    // ── Icons ──────────────────────────────────────────────────────────────
+    // An `icon` field is either a themed icon name or a path to an image file
+    // (a person's pick, or a .desktop entry that named one). Only the names
+    // go through the icon theme.
+    function isIconPath(icon) {
+        const value = String(icon ?? "").trim();
+        return value.startsWith("/") || value.startsWith("file://") || value.startsWith("~/");
+    }
+    // What an `icon` draws as, on the tile, the plate and the rows alike. A
+    // name that finds nothing takes the caller's `fallback`.
+    function iconSource(icon, fallback) {
+        const value = String(icon ?? "").trim();
+        if (root.isIconPath(value)) {
+            if (value.startsWith("file://"))
+                return value;
+            if (value.startsWith("~/"))
+                return "file://" + Directories.home + value.slice(1);
+            return "file://" + value;
+        }
+        return Quickshell.iconPath(value !== "" ? value : fallback, "image-missing");
     }
 
     // The part of the screen icons are placed in: the margin on every edge,
@@ -84,6 +299,28 @@ Singleton {
             screenWidth: w, screenHeight: h };
     }
 
+    // How far a floating card keeps from each screen edge: the bar's and the
+    // dock's thickness (wherever they sit) plus a gap. Unlike workArea this
+    // ignores `avoidPanels`, which is about where icons live, not about a
+    // menu that must not open underneath a panel.
+    function panelInsets(screenName) {
+        const gap = 8;
+        const insets = { left: gap, top: gap, right: gap, bottom: gap };
+        if (GlobalStates.barOpen) {
+            if (Config.options.bar.vertical) {
+                const side = Config.options.bar.bottom ? "right" : "left";
+                insets[side] += Appearance.sizes.verticalBarWidth;
+            } else {
+                const side = Config.options.bar.bottom ? "bottom" : "top";
+                insets[side] += Appearance.sizes.barHeight;
+            }
+        }
+        const dock = Config.options.dock?.enable ? GlobalStates.dockInsets[screenName] : null;
+        if (dock && insets[dock.side] !== undefined)
+            insets[dock.side] += dock.thickness;
+        return insets;
+    }
+
     function grid(screenName) {
         const area = root.workArea(screenName);
         const origin = root.options.origin ?? "topLeft";
@@ -98,18 +335,30 @@ Singleton {
             byColumns: (root.options.flow ?? "columns") !== "rows"
         };
     }
-    function cellPos(g, col, row) {
-        const x = g.right ? g.area.x + g.area.width - (col + 1) * g.cw : g.area.x + col * g.cw;
-        const y = g.bottom ? g.area.y + g.area.height - (row + 1) * g.ch : g.area.y + row * g.ch;
+    // How many cells a side an entry covers: an extended app group is a 2x2
+    // block (three apps and a mini group), everything else is one cell.
+    function spanOf(item) {
+        return item && item.type === "group" && item.large && !item.stack ? 2 : 1;
+    }
+    // Blocks are addressed by their lowest cell indices, so a 2x2 covers
+    // (col..col+1, row..row+1) whichever corner the grid grows from. With
+    // span 1 every function below is the single-cell original.
+    function cellPos(g, col, row, span = 1) {
+        const left = g.right ? col + span - 1 : col;
+        const top = g.bottom ? row + span - 1 : row;
+        const x = g.right ? g.area.x + g.area.width - (left + 1) * g.cw : g.area.x + left * g.cw;
+        const y = g.bottom ? g.area.y + g.area.height - (top + 1) * g.ch : g.area.y + top * g.ch;
         return {
-            x: Math.max(0, Math.min(g.area.screenWidth - g.cw, x)),
-            y: Math.max(0, Math.min(g.area.screenHeight - g.ch, y))
+            x: Math.max(0, Math.min(g.area.screenWidth - g.cw * span, x)),
+            y: Math.max(0, Math.min(g.area.screenHeight - g.ch * span, y))
         };
     }
-    function cellOf(g, x, y) {
-        const col = Math.round((g.right ? g.area.x + g.area.width - g.cw - x : x - g.area.x) / g.cw);
-        const row = Math.round((g.bottom ? g.area.y + g.area.height - g.ch - y : y - g.area.y) / g.ch);
-        return { col: Math.max(0, Math.min(g.cols - 1, col)), row: Math.max(0, Math.min(g.rows - 1, row)) };
+    function cellOf(g, x, y, span = 1) {
+        const left = Math.round((g.right ? g.area.x + g.area.width - g.cw - x : x - g.area.x) / g.cw);
+        const top = Math.round((g.bottom ? g.area.y + g.area.height - g.ch - y : y - g.area.y) / g.ch);
+        const col = g.right ? left - span + 1 : left;
+        const row = g.bottom ? top - span + 1 : top;
+        return { col: Math.max(0, Math.min(g.cols - span, col)), row: Math.max(0, Math.min(g.rows - span, row)) };
     }
     // The i-th cell in fill order: down the first column (or across the
     // first row) from the origin corner. Past the last cell the fill keeps
@@ -122,13 +371,25 @@ Singleton {
     function key(cell) {
         return cell.col + ":" + cell.row;
     }
-    // The free cell closest to (col, row), by distance; the cell itself
-    // when the whole area is taken.
-    function nearestFree(g, taken, col, row) {
+    function blockFree(taken, col, row, span) {
+        for (let c = 0; c < span; ++c)
+            for (let r = 0; r < span; ++r)
+                if (taken.has((col + c) + ":" + (row + r)))
+                    return false;
+        return true;
+    }
+    function markBlock(taken, cell, span) {
+        for (let c = 0; c < span; ++c)
+            for (let r = 0; r < span; ++r)
+                taken.add((cell.col + c) + ":" + (cell.row + r));
+    }
+    // The free cell (block, for a span above 1) closest to (col, row), by
+    // distance; the cell itself when the whole area is taken.
+    function nearestFree(g, taken, col, row, span = 1) {
         let best = null, bestDistance = Infinity;
-        for (let c = 0; c < g.cols; ++c) {
-            for (let r = 0; r < g.rows; ++r) {
-                if (taken.has(c + ":" + r))
+        for (let c = 0; c <= g.cols - span; ++c) {
+            for (let r = 0; r <= g.rows - span; ++r) {
+                if (!root.blockFree(taken, c, r, span))
                     continue;
                 const d = (c - col) * (c - col) * g.cw * g.cw + (r - row) * (r - row) * g.ch * g.ch;
                 if (d < bestDistance) {
@@ -139,19 +400,100 @@ Singleton {
         }
         return best ?? { col: col, row: row };
     }
-    function firstFree(g, taken) {
+    function firstFree(g, taken, span = 1) {
         for (let i = 0; i < g.cols * g.rows; ++i) {
             const cell = root.slotCell(g, i);
-            if (!taken.has(root.key(cell)))
+            if (cell.col + span <= g.cols && cell.row + span <= g.rows && root.blockFree(taken, cell.col, cell.row, span))
                 return cell;
         }
         return null;
     }
+    // The spot nearest (x, y) where a tile overlaps no other: the point
+    // itself when it is clear, else the closest edge-to-edge neighbour of
+    // whatever blocks it, else the nearest free grid cell.
+    function isLocalPath(path) {
+        return typeof path === "string" && path.startsWith("/");
+    }
+    function fileUrl(path) {
+        return "file://" + path.split("/").map(part => encodeURIComponent(part)).join("/");
+    }
+    function fits(g, others, x, y, span = 1) {
+        const w = g.cw * span, h = g.ch * span;
+        return !others.some(o => {
+            const s = root.spanOf(o);
+            return x < o.x + g.cw * s && x + w > o.x && y < o.y + g.ch * s && y + h > o.y;
+        });
+    }
+    function freeSpot(g, others, x, y, span = 1) {
+        const w = g.cw * span, h = g.ch * span;
+        const clampX = v => Math.max(0, Math.min(g.area.screenWidth - w, Math.round(v)));
+        const clampY = v => Math.max(0, Math.min(g.area.screenHeight - h, Math.round(v)));
+        const ox = clampX(x), oy = clampY(y);
+        if (root.fits(g, others, ox, oy, span))
+            return { x: ox, y: oy };
+        let best = null, bestDistance = Infinity;
+        const consider = (px, py) => {
+            px = clampX(px);
+            py = clampY(py);
+            const d = (px - ox) * (px - ox) + (py - oy) * (py - oy);
+            if (d < bestDistance && root.fits(g, others, px, py, span)) {
+                bestDistance = d;
+                best = { x: px, y: py };
+            }
+        };
+        for (const other of others) {
+            const os = root.spanOf(other);
+            const ow = g.cw * os, oh = g.ch * os;
+            if (ox >= other.x + ow + w || ox <= other.x - ow - w || oy >= other.y + oh + h || oy <= other.y - oh - h)
+                continue;
+            for (const dx of [-1, 0, 1]) {
+                for (const dy of [-1, 0, 1]) {
+                    if (dx === 0 && dy === 0)
+                        continue;
+                    consider(dx === 0 ? ox : dx < 0 ? other.x - w : other.x + ow,
+                        dy === 0 ? oy : dy < 0 ? other.y - h : other.y + oh);
+                }
+            }
+        }
+        if (best)
+            return best;
+        const want = root.cellOf(g, ox, oy, span);
+        const cell = root.nearestFree(g, root.takenCells(g, others), want.col, want.row, span);
+        return root.cellPos(g, cell.col, cell.row, span);
+    }
+    // Moved items resolved one after another against what stays and what
+    // has already landed, so a group keeps its shape where it fits.
+    function resolveMoved(g, items, movedIds) {
+        const moving = new Set(movedIds);
+        const placed = items.filter(item => !moving.has(item.id));
+        const landed = new Map();
+        for (const item of items) {
+            if (!moving.has(item.id))
+                continue;
+            const spot = root.freeSpot(g, placed, item.x, item.y, root.spanOf(item));
+            const moved = Object.assign({}, item, spot);
+            placed.push(moved);
+            landed.set(item.id, moved);
+        }
+        return items.map(item => landed.get(item.id) ?? item);
+    }
+    // Where a free-form drop at (x, y) lands, for the layer's ghost.
+    function planFreeDrop(screenName, ids, x, y) {
+        const g = root.grid(screenName);
+        const skip = new Set(ids);
+        const all = root.itemsFor(screenName);
+        const span = ids.length === 1 ? root.spanOf(all.find(item => item.id === ids[0])) : 1;
+        const spot = root.freeSpot(g, all.filter(item => !skip.has(item.id)), x, y, span);
+        return { x: spot.x, y: spot.y, bumpId: "", bumpX: 0, bumpY: 0 };
+    }
+
     function takenCells(g, items, exceptIds) {
         const taken = new Set();
         for (const item of items) {
-            if (!exceptIds || !exceptIds.has(item.id))
-                taken.add(root.key(root.cellOf(g, item.x, item.y)));
+            if (!exceptIds || !exceptIds.has(item.id)) {
+                const span = root.spanOf(item);
+                root.markBlock(taken, root.cellOf(g, item.x, item.y, span), span);
+            }
         }
         return taken;
     }
@@ -164,18 +506,23 @@ Singleton {
         for (const item of items) {
             if (!moving.has(item.id))
                 continue;
-            const want = root.cellOf(g, item.x, item.y);
-            const cell = root.nearestFree(g, taken, want.col, want.row);
-            taken.add(root.key(cell));
-            landed.set(item.id, root.cellPos(g, cell.col, cell.row));
+            const span = root.spanOf(item);
+            const want = root.cellOf(g, item.x, item.y, span);
+            const cell = root.nearestFree(g, taken, want.col, want.row, span);
+            root.markBlock(taken, cell, span);
+            landed.set(item.id, root.cellPos(g, cell.col, cell.row, span));
         }
         return items.map(item => landed.has(item.id) ? Object.assign({}, item, landed.get(item.id)) : item);
     }
-    // Lay the items out in the given order, one cell each, from the origin.
+    // Lay the items out in the given order, from the origin: one cell each, a
+    // block for an extended group.
     function arrangeList(g, ordered) {
+        const taken = new Set();
         return ordered.map((item, i) => {
-            const cell = root.slotCell(g, i);
-            return Object.assign({}, item, root.cellPos(g, cell.col, cell.row));
+            const span = root.spanOf(item);
+            const cell = root.firstFree(g, taken, span) ?? root.slotCell(g, i);
+            root.markBlock(taken, cell, span);
+            return Object.assign({}, item, root.cellPos(g, cell.col, cell.row, span));
         });
     }
 
@@ -356,16 +703,26 @@ Singleton {
     // A hot reload builds this singleton with the config already loaded:
     // no ready edge will come, so the size in force is the baseline now.
     Component.onCompleted: {
+        Quickshell.execDetached(["mkdir", "-p", root.desktopFolder]);
         if (Config.ready) {
             root.lastCellWidth = root.cellWidth;
             root.lastCellHeight = root.cellHeight;
         }
+        if (Persistent.ready)
+            Qt.callLater(root.scanDesktop);
     }
     Connections {
         target: Config
         function onReadyChanged() {
             root.lastCellWidth = 0;
             Qt.callLater(root.reflow);
+        }
+    }
+    Connections {
+        target: Persistent
+        function onReadyChanged() {
+            if (Persistent.ready)
+                Qt.callLater(root.scanDesktop);
         }
     }
     function reflow() {
@@ -388,10 +745,11 @@ Singleton {
             const scaled = items.map(item => {
                 // Measured from the corner's own side of the icon, so the
                 // icons nearest the corner stay put.
-                const ex = g.right ? item.x + ow : item.x;
-                const ey = g.bottom ? item.y + oh : item.y;
-                const nx = ax + (ex - ax) * sx - (g.right ? root.cellWidth : 0);
-                const ny = ay + (ey - ay) * sy - (g.bottom ? root.cellHeight : 0);
+                const span = root.spanOf(item);
+                const ex = g.right ? item.x + ow * span : item.x;
+                const ey = g.bottom ? item.y + oh * span : item.y;
+                const nx = ax + (ex - ax) * sx - (g.right ? root.cellWidth * span : 0);
+                const ny = ay + (ey - ay) * sy - (g.bottom ? root.cellHeight * span : 0);
                 return Object.assign({}, item, { x: Math.round(nx / 10) * 10, y: Math.round(ny / 10) * 10 });
             });
             next[name] = root.options.keepSorted ? root.normalize(name, scaled)
@@ -401,11 +759,261 @@ Singleton {
     }
 
     // ── Store ──────────────────────────────────────────────────────────────
-    function importUrls(screenName, urls, x, y, targetId, width, height) {
+    function syncFromDisk(diskItems) {
+        if (!Persistent.ready || Persistent.blockWrites)
+            return;
+        // Kept beside the store, never in it: a folder's contents changing
+        // must not rewrite the saved layout.
+        const previews = {};
+        for (const d of diskItems) {
+            if (d.type === "directory" && Array.isArray(d.previews) && d.previews.length > 0)
+                previews[d.path] = d.previews;
+        }
+        if (JSON.stringify(previews) !== JSON.stringify(root.folderPreviews))
+            root.folderPreviews = previews;
+        const linked = {};
+        for (const d of diskItems) {
+            if (d.link && d.path)
+                linked[d.path] = true;
+        }
+        if (JSON.stringify(linked) !== JSON.stringify(root.linkedPaths))
+            root.linkedPaths = linked;
+        const thumbnails = {};
+        for (const d of diskItems) {
+            if (d.type === "file" && d.thumbnail && d.path)
+                thumbnails[d.path] = d.thumbnail;
+        }
+        if (JSON.stringify(thumbnails) !== JSON.stringify(root.fileThumbnails))
+            root.fileThumbnails = thumbnails;
+        root.requestThumbnails(diskItems);
+        const currentScreens = Object.assign({}, root.screens);
+        let changed = false;
+
+        const matchedDiskPaths = new Set();
+        const nextScreens = {};
+
+        const activeScreenNames = Quickshell.screens.length > 0
+            ? Quickshell.screens.map(s => s.name)
+            : (Object.keys(currentScreens).length > 0 ? Object.keys(currentScreens) : ["eDP-1"]);
+
+        const allScreenNames = Array.from(new Set(activeScreenNames.concat(Object.keys(currentScreens))));
+
+        for (const sName of allScreenNames) {
+            const existing = Array.isArray(currentScreens[sName]) ? currentScreens[sName] : [];
+            const kept = [];
+
+            for (const item of existing) {
+                if (item.type === "group" && Array.isArray(item.apps)) {
+                    const survivingApps = item.apps.filter(app => {
+                        const m = diskItems.find(d =>
+                            (app.path && d.path && app.path === d.path) ||
+                            (app.id && d.id && app.id === d.id) ||
+                            (app.fileName && d.fileName && app.fileName === d.fileName) ||
+                            (app.path && d.fileName && app.path.endsWith("/" + d.fileName))
+                        );
+                        if (m)
+                            matchedDiskPaths.add(m.path);
+                        return !!m;
+                    });
+                    if (survivingApps.length > 0) {
+                        if (survivingApps.length !== item.apps.length)
+                            changed = true;
+                        kept.push(Object.assign({}, item, { apps: survivingApps }));
+                    } else {
+                        changed = true;
+                    }
+                    continue;
+                }
+
+                const diskMatch = diskItems.find(d =>
+                    (item.path && d.path && item.path === d.path) ||
+                    (item.id && d.id && item.id === d.id) ||
+                    (item.fileName && d.fileName && item.fileName === d.fileName) ||
+                    (item.path && d.fileName && item.path.endsWith("/" + d.fileName))
+                );
+
+                if (diskMatch) {
+                    matchedDiskPaths.add(diskMatch.path);
+                    // A picture the person chose (setIcon) outlives the
+                    // scan; only an item on its kind's icon follows the disk.
+                    const updated = Object.assign({}, item, {
+                        id: diskMatch.id,
+                        name: diskMatch.name,
+                        icon: item.customIcon ? item.icon : diskMatch.icon,
+                        type: diskMatch.type,
+                        path: diskMatch.path,
+                        fileName: diskMatch.fileName
+                    });
+                    if (JSON.stringify(updated) !== JSON.stringify(item))
+                        changed = true;
+                    kept.push(updated);
+                } else {
+                    changed = true;
+                }
+            }
+            nextScreens[sName] = kept;
+        }
+
+        const newItems = diskItems.filter(d => !matchedDiskPaths.has(d.path));
+        let created = null;
+        if (newItems.length > 0) {
+            changed = true;
+            const primaryScreen = (Quickshell.screens.find(s => s.name === Hyprland.focusedMonitor?.name)?.name)
+                || Quickshell.screens[0]?.name
+                || allScreenNames[0]
+                || "eDP-1";
+
+            for (const newItem of newItems) {
+                let px = -1, py = -1;
+                let targetScreen = primaryScreen;
+
+                const pendingKey = newItem.path || newItem.fileName;
+                const foundPending = root.pendingPlacements[pendingKey]
+                    || root.pendingPlacements[newItem.fileName]
+                    || (newItem.name ? root.pendingPlacements[newItem.name] : null)
+                    || root.pendingPlacements["__new_item__"];
+                if (foundPending) {
+                    targetScreen = foundPending.screen || primaryScreen;
+                    px = foundPending.x;
+                    py = foundPending.y;
+                    const nextPending = Object.assign({}, root.pendingPlacements);
+                    delete nextPending[pendingKey];
+                    delete nextPending[newItem.fileName];
+                    if (newItem.name)
+                        delete nextPending[newItem.name];
+                    delete nextPending["__new_item__"];
+                    root.pendingPlacements = nextPending;
+                }
+
+                if (!nextScreens[targetScreen])
+                    nextScreens[targetScreen] = [];
+
+                const targetG = root.grid(targetScreen);
+                const taken = root.takenCells(targetG, nextScreens[targetScreen]);
+
+                if (px < 0 || py < 0) {
+                    const cell = root.firstFree(targetG, taken) || root.slotCell(targetG, nextScreens[targetScreen].length);
+                    const pos = root.cellPos(targetG, cell.col, cell.row);
+                    px = pos.x;
+                    py = pos.y;
+                } else {
+                    px = Math.round(px / 10) * 10;
+                    py = Math.round(py / 10) * 10;
+                    if (root.options.autoArrange) {
+                        const want = root.cellOf(targetG, px, py);
+                        const cell = root.nearestFree(targetG, taken, want.col, want.row);
+                        const pos = root.cellPos(targetG, cell.col, cell.row);
+                        px = pos.x;
+                        py = pos.y;
+                    } else {
+                        const spot = root.freeSpot(targetG, nextScreens[targetScreen], px, py);
+                        px = spot.x;
+                        py = spot.y;
+                    }
+                }
+
+                const placed = Object.assign({}, newItem, {
+                    x: px,
+                    y: py,
+                    addedAt: Date.now(),
+                    launchCount: 0
+                });
+                nextScreens[targetScreen].push(placed);
+                if (foundPending && root.renameOnCreate) {
+                    created = { screen: targetScreen, id: placed.id };
+                    root.renameOnCreate = null;
+                }
+            }
+        }
+
+        if (changed) {
+            for (const sName of Object.keys(nextScreens)) {
+                if (root.options.keepSorted)
+                    nextScreens[sName] = root.normalize(sName, nextScreens[sName]);
+            }
+            root.writeAll(nextScreens);
+        }
+        if (created)
+            root.createdForRename(created.screen, created.id);
+    }
+
+    function createFolder(screenName, x, y, name = "") {
+        Quickshell.execDetached(["mkdir", "-p", root.desktopFolder]);
+        root.registerPlacement(name || "New Folder", screenName, x, y);
+        root.registerPlacement("__new_item__", screenName, x, y);
+        root.renameOnCreate = { screen: screenName };
+        actionRunner.run(["/usr/bin/python3", Directories.scriptPath + "/desktop_shortcuts.py",
+            "create-folder", root.desktopFolder, name]);
+    }
+
+    function createFile(screenName, x, y, name = "") {
+        Quickshell.execDetached(["mkdir", "-p", root.desktopFolder]);
+        root.registerPlacement(name || "New Document.txt", screenName, x, y);
+        root.registerPlacement("__new_item__", screenName, x, y);
+        root.renameOnCreate = { screen: screenName };
+        actionRunner.run(["/usr/bin/python3", Directories.scriptPath + "/desktop_shortcuts.py",
+            "create-file", root.desktopFolder, name]);
+    }
+
+    function addDockApps(screenName, appIds, x, y) {
+        if (!appIds || !appIds.length)
+            return false;
+        Quickshell.execDetached(["mkdir", "-p", root.desktopFolder]);
+        let curX = Math.round(x / 10) * 10;
+        let curY = Math.round(y / 10) * 10;
+        for (const appId of appIds) {
+            root.registerPlacement(appId, screenName, curX, curY);
+            actionRunner.run(["/usr/bin/python3", Directories.scriptPath + "/desktop_shortcuts.py",
+                "create-app", root.desktopFolder, appId]);
+            curY += root.cellHeight;
+        }
+        return true;
+    }
+
+    // A launcher result sent to the desktop: an app id or a file/folder path,
+    // dropped on the first free cell of the focused screen, since there is no
+    // pointer position to honour.
+    function addFromLauncher(kind, value) {
+        if (!value || !Persistent.ready)
+            return false;
+        const focused = Hyprland.focusedMonitor?.name ?? "";
+        const screenName = root.isConnected(focused) ? focused : (Quickshell.screens[0]?.name ?? "");
+        if (!screenName)
+            return false;
+        const g = root.grid(screenName);
+        const cell = root.firstFree(g, root.takenCells(g, root.itemsFor(screenName)));
+        if (!cell) {
+            root.error = Translation.tr("No free space for desktop shortcuts");
+            return false;
+        }
+        const spot = root.cellPos(g, cell.col, cell.row);
+        if (kind === "app")
+            return root.addDockApps(screenName, [value], spot.x, spot.y);
+        const path = value.startsWith("~/") ? Quickshell.env("HOME") + value.slice(1) : value;
+        return root.importUrls(screenName, [path], spot.x, spot.y, "", g.area.screenWidth, g.area.screenHeight);
+    }
+
+    function registerPlacement(key, screenName, x, y) {
+        const next = Object.assign({}, root.pendingPlacements);
+        next[key] = { screen: screenName, x: x, y: y };
+        root.pendingPlacements = next;
+    }
+
+    function openDesktopFolder() {
+        Quickshell.execDetached(["mkdir", "-p", root.desktopFolder]);
+        Quickshell.execDetached(["xdg-open", root.desktopFolder]);
+    }
+
+    // Dropped and pasted files and folders are linked, never copied: the
+    // desktop shows them where they live (a dropped project folder was once
+    // copied whole, 196 GB, in the background). "copy" and "move" remain
+    // for a caller that means them.
+    function importUrls(screenName, urls, x, y, targetId, width, height, mode = "link") {
         if (!Persistent.ready || !urls.length)
             return false;
+        Quickshell.execDetached(["mkdir", "-p", root.desktopFolder]);
         root.importQueue.push({ screen: screenName, urls: urls, x: x, y: y,
-            target: targetId, width: width, height: height });
+            target: targetId, width: width, height: height, mode: mode });
         root.startImport();
         return true;
     }
@@ -416,7 +1024,8 @@ Singleton {
         root.error = "";
         root.currentImport = root.importQueue.shift();
         resolver.command = ["/usr/bin/python3", Directories.scriptPath + "/desktop_shortcuts.py",
-            JSON.stringify(root.currentImport.urls)];
+            "copy-to-desktop", root.desktopFolder, JSON.stringify(root.currentImport.urls),
+            root.currentImport.mode ?? "link"];
         resolver.running = true;
     }
 
@@ -427,8 +1036,17 @@ Singleton {
                 try {
                     const result = JSON.parse(text);
                     const request = root.currentImport;
-                    root.error = result.errors.join("\n");
-                    root.add(request.screen, result.items, request.x, request.y, request.target, request.width, request.height);
+                    root.error = (result.errors || []).join("\n");
+                    if (Array.isArray(result.items) && result.items.length > 0) {
+                        let curX = request.x;
+                        let curY = request.y;
+                        for (const it of result.items) {
+                            root.registerPlacement(it.path, request.screen, curX, curY);
+                            root.registerPlacement(it.fileName, request.screen, curX, curY);
+                            curY += root.cellHeight;
+                        }
+                        root.scanDesktop();
+                    }
                 } catch (error) {
                     root.error = Translation.tr("Could not import desktop shortcut");
                     console.warn("[DesktopShortcuts]", error);
@@ -476,8 +1094,16 @@ Singleton {
     }
 
     function add(screenName, entries, x, y, targetId, width, height) {
-        if (!entries.length)
+        if (!entries || !entries.length)
             return false;
+        const appEntries = entries.filter(e => e.type === "app" && !e.path);
+        if (appEntries.length > 0)
+            return root.addDockApps(screenName, appEntries.map(e => e.id), x, y);
+
+        const outsideEntries = entries.filter(e => e.path && !e.path.startsWith(root.desktopFolder));
+        if (outsideEntries.length > 0)
+            return root.importUrls(screenName, outsideEntries.map(e => e.path), x, y, targetId, width, height);
+
         const items = root.itemsFor(screenName).slice();
         const targetIndex = targetId && entries.every(entry => root.isGroupable(entry))
             ? items.findIndex(item => item.id === targetId && root.isGroupable(item)) : -1;
@@ -492,9 +1118,10 @@ Singleton {
                         apps.push(app);
                 }
             }
-            items[targetIndex] = { id: target.type === "group" ? target.id : "group:" + Date.now(),
+            items[targetIndex] = Object.assign({}, target.type === "group" ? target : {}, {
+                id: target.type === "group" ? target.id : "group:" + Date.now(),
                 type: "group", name: target.type === "group" ? target.name : Translation.tr("App group"),
-                apps: apps, x: target.x, y: target.y, addedAt: target.addedAt ?? Date.now() };
+                apps: apps, x: target.x, y: target.y, addedAt: target.addedAt ?? Date.now() });
         } else {
             const g = root.grid(screenName);
             const cw = g.cw, ch = g.ch;
@@ -513,7 +1140,7 @@ Singleton {
                     const p = root.cellPos(g, cell.col, cell.row);
                     px = p.x;
                     py = p.y;
-                } else if (items.some(item => Math.abs(item.x - px) < cw && Math.abs(item.y - py) < ch)) {
+                } else if (!root.fits(g, items, px, py)) {
                     const cell = root.firstFree(g, taken);
                     if (!cell) {
                         root.error = Translation.tr("No free space for desktop shortcuts");
@@ -549,14 +1176,17 @@ Singleton {
                     apps.push(app);
             }
             root.save(screenName, items.filter(item => item.id !== itemId).map(item => item.id === target.id
-                ? { id: target.type === "group" ? target.id : "group:" + Date.now(), type: "group",
+                ? Object.assign({}, target.type === "group" ? target : {}, {
+                    id: target.type === "group" ? target.id : "group:" + Date.now(), type: "group",
                     name: target.type === "group" ? target.name : Translation.tr("App group"),
-                    apps: apps, x: target.x, y: target.y, addedAt: target.addedAt ?? Date.now() } : item));
+                    apps: apps, x: target.x, y: target.y, addedAt: target.addedAt ?? Date.now() }) : item));
         } else {
             root.releaseKeptOrder();
             let next = items.map(item => item.id === itemId
                 ? Object.assign({}, item, { x: Math.round(x), y: Math.round(y) }) : item);
-            if (root.options.autoArrange) {
+            if (!root.options.autoArrange)
+                next = root.resolveMoved(root.grid(screenName), next, [itemId]);
+            else {
                 const plan = root.planDrop(screenName, itemId, x, y);
                 next = items.map(item => item.id === itemId ? Object.assign({}, item, { x: plan.x, y: plan.y })
                     : item.id === plan.bumpId ? Object.assign({}, item, { x: plan.bumpX, y: plan.bumpY }) : item);
@@ -570,16 +1200,34 @@ Singleton {
     function planDrop(screenName, itemId, x, y) {
         const g = root.grid(screenName);
         const items = root.itemsFor(screenName);
-        const cell = root.cellOf(g, x, y);
+        const mine = items.find(item => item.id === itemId);
+        const span = root.spanOf(mine);
+        const cell = root.cellOf(g, x, y, span);
+        const taken = root.takenCells(g, items, new Set([itemId]));
+        // The block the icon asks for, when something stands on it: a
+        // single icon sends the one it lands on to the nearest free cell,
+        // an extended group takes the nearest block that is already free.
+        if (span > 1 || root.blockFree(taken, cell.col, cell.row, span)) {
+            const free = span > 1 ? root.nearestFree(g, taken, cell.col, cell.row, span) : cell;
+            const p = root.cellPos(g, free.col, free.row, span);
+            return { x: p.x, y: p.y, bumpId: "", bumpX: 0, bumpY: 0 };
+        }
         const p = root.cellPos(g, cell.col, cell.row);
         const plan = { x: p.x, y: p.y, bumpId: "", bumpX: 0, bumpY: 0 };
-        const occupant = items.find(item => item.id !== itemId
-            && root.key(root.cellOf(g, item.x, item.y)) === root.key(cell));
+        const occupant = items.find(item => {
+            if (item.id === itemId)
+                return false;
+            const os = root.spanOf(item);
+            const oc = root.cellOf(g, item.x, item.y, os);
+            return cell.col >= oc.col && cell.col < oc.col + os && cell.row >= oc.row && cell.row < oc.row + os;
+        });
         if (occupant) {
-            const taken = root.takenCells(g, items, new Set([itemId, occupant.id]));
-            taken.add(root.key(cell));
-            const out = root.nearestFree(g, taken, cell.col, cell.row);
-            const q = root.cellPos(g, out.col, out.row);
+            const os = root.spanOf(occupant);
+            const free = root.takenCells(g, items, new Set([itemId, occupant.id]));
+            root.markBlock(free, cell, 1);
+            const oc = root.cellOf(g, occupant.x, occupant.y, os);
+            const out = root.nearestFree(g, free, oc.col, oc.row, os);
+            const q = root.cellPos(g, out.col, out.row, os);
             plan.bumpId = occupant.id;
             plan.bumpX = q.x;
             plan.bumpY = q.y;
@@ -588,7 +1236,11 @@ Singleton {
     }
 
     function remove(screenName, itemId) {
+        const item = root.itemsFor(screenName).find(i => i.id === itemId);
+        const path = item ? (item.path || item.id) : itemId;
         root.save(screenName, root.itemsFor(screenName).filter(item => item.id !== itemId));
+        actionRunner.run(["/usr/bin/python3", Directories.scriptPath + "/desktop_shortcuts.py",
+            "trash", path]);
     }
     // Bulk forms of the two gestures a multi-selection produces. One save
     // for the whole set: a group move must not write the store per icon.
@@ -600,12 +1252,40 @@ Singleton {
             : item);
         if (root.options.autoArrange)
             next = root.settle(root.grid(screenName), next, moves.map(move => move.id));
+        else
+            next = root.resolveMoved(root.grid(screenName), next, moves.map(move => move.id));
         root.save(screenName, next);
+    }
+    // The launch pad's reflow: every move lands exactly where it says (the
+    // sections' grid), except a `free` one - a tile dropped outside every
+    // section - which takes the nearest free spot like any drop. Whatever
+    // else sat under a placed tile steps aside to the nearest free spot.
+    function placeMany(screenName, moves) {
+        root.releaseKeptOrder();
+        const landed = new Map(moves.map(move => [move.id, move]));
+        const next = root.itemsFor(screenName).map(item => landed.has(item.id)
+            ? Object.assign({}, item, { x: Math.round(landed.get(item.id).x), y: Math.round(landed.get(item.id).y) })
+            : item);
+        const fixed = next.filter(item => landed.has(item.id) && !landed.get(item.id).free);
+        const overlaps = (a, b) => {
+            const sa = root.spanOf(a), sb = root.spanOf(b);
+            return a.x < b.x + root.cellWidth * sb && a.x + root.cellWidth * sa > b.x
+                && a.y < b.y + root.cellHeight * sb && a.y + root.cellHeight * sa > b.y;
+        };
+        const displaced = next.filter(item => landed.has(item.id) ? landed.get(item.id).free
+            : fixed.some(f => overlaps(f, item))).map(item => item.id);
+        root.save(screenName, displaced.length > 0 ? root.resolveMoved(root.grid(screenName), next, displaced) : next);
     }
 
     function removeMany(screenName, ids) {
         const gone = new Set(ids);
+        const items = root.itemsFor(screenName);
+        const toTrash = items.filter(i => gone.has(i.id)).map(i => i.path || i.id);
         root.save(screenName, root.itemsFor(screenName).filter(item => !gone.has(item.id)));
+        for (const p of toTrash) {
+            actionRunner.run(["/usr/bin/python3", Directories.scriptPath + "/desktop_shortcuts.py",
+                "trash", p]);
+        }
     }
     // "Align to grid": every icon onto the nearest free cell of the grid,
     // in reading order from the origin, so the set keeps its shape and
@@ -640,9 +1320,9 @@ Singleton {
         const order = chosen.slice().sort((a, b) => vertical ? (a.y - b.y) || (a.x - b.x) : (a.x - b.x) || (a.y - b.y));
         const others = items.filter(item => !picked.has(item.id));
         const placed = [];
-        const clash = (x, y) => others.concat(placed).some(o => Math.abs(o.x - x) < g.cw && Math.abs(o.y - y) < g.ch);
         const landed = new Map();
         for (const item of order) {
+            const clash = (x, y) => !root.fits(g, others.concat(placed), x, y, root.spanOf(item));
             let x = vertical ? line : item.x;
             let y = vertical ? item.y : line;
             let guard = 0;
@@ -652,7 +1332,7 @@ Singleton {
                 else
                     x += g.cw;
             }
-            placed.push({ x: x, y: y });
+            placed.push(Object.assign({}, item, { x: x, y: y }));
             landed.set(item.id, { x: x, y: y });
         }
         root.save(screenName, items.map(item => landed.has(item.id) ? Object.assign({}, item, landed.get(item.id)) : item));
@@ -691,10 +1371,10 @@ Singleton {
             return;
         const anchor = chosen.reduce((best, item) => (item.y < best.y || (item.y === best.y && item.x < best.x)) ? item : best, chosen[0]);
         const others = items.filter(item => !picked.has(item.id));
-        const clash = (x, y) => others.some(o => Math.abs(o.x - x) < g.cw && Math.abs(o.y - y) < g.ch);
         const landed = new Map();
         let x = anchor.x, y = anchor.y;
         for (const item of chosen) {
+            const clash = (x, y) => !root.fits(g, others, x, y, root.spanOf(item));
             let guard = 0;
             while (clash(x, y) && guard++ < 200) {
                 if (axis === "column")
@@ -752,9 +1432,10 @@ Singleton {
         const taken = root.takenCells(g, target);
         const arrived = [];
         for (const item of leaving) {
-            const cell = root.firstFree(g, taken) ?? root.slotCell(g, target.length + arrived.length);
-            taken.add(root.key(cell));
-            arrived.push(Object.assign({}, item, root.cellPos(g, cell.col, cell.row)));
+            const span = root.spanOf(item);
+            const cell = root.firstFree(g, taken, span) ?? root.slotCell(g, target.length + arrived.length);
+            root.markBlock(taken, cell, span);
+            arrived.push(Object.assign({}, item, root.cellPos(g, cell.col, cell.row, span)));
         }
         root.pushUndo();
         const next = Object.assign({}, root.screens);
@@ -766,8 +1447,37 @@ Singleton {
     function rename(screenName, itemId, name) {
         if (!name.trim())
             return;
-        root.save(screenName, root.itemsFor(screenName).map(item => item.id === itemId
-            ? Object.assign({}, item, { name: name.trim() }) : item));
+        const newName = name.trim();
+        const item = root.itemsFor(screenName).find(i => i.id === itemId);
+        const targetId = item ? (item.path || item.id) : itemId;
+        if (item)
+            root.registerPlacement(newName, screenName, item.x, item.y);
+        root.save(screenName, root.itemsFor(screenName).map(i => i.id === itemId
+            ? Object.assign({}, i, { name: newName }) : i));
+        actionRunner.run(["/usr/bin/python3", Directories.scriptPath + "/desktop_shortcuts.py",
+            "rename", root.desktopFolder, targetId, newName]);
+    }
+
+    // A person's picture for one item, as the path of an image file; "" puts
+    // it back on whatever its kind draws (the store drops the field rather
+    // than keeping an empty one). How it becomes an image is iconSource().
+    function setIcon(screenName, itemId, icon) {
+        const value = String(icon ?? "").trim();
+        root.save(screenName, root.itemsFor(screenName).map(item => {
+            if (item.id !== itemId)
+                return item;
+            const next = Object.assign({}, item);
+            if (value === "") {
+                delete next.icon;
+                delete next.customIcon;
+            } else {
+                next.icon = value;
+                // The flag the rescan merge keeps the icon by: without it
+                // the next scan put the kind's icon back.
+                next.customIcon = true;
+            }
+            return next;
+        }));
     }
 
     function removeMember(screenName, groupId, appId) {
@@ -785,13 +1495,54 @@ Singleton {
             return;
         const rest = items.filter(item => item.id !== groupId);
         const taken = root.takenCells(g, rest);
-        const home = root.cellOf(g, group.x, group.y);
+        const home = root.cellOf(g, group.x, group.y, root.spanOf(group));
         const members = (group.apps ?? []).map(app => {
             const cell = root.nearestFree(g, taken, home.col, home.row);
             taken.add(root.key(cell));
             return Object.assign({}, app, root.cellPos(g, cell.col, cell.row));
         });
         root.save(screenName, rest.concat(members));
+    }
+
+    // Extend a group into the 2x2 block (three apps and a mini group) or
+    // shrink it back to one cell. Growing needs a free block: it takes the
+    // nearest one to where the group stands, or says there is none.
+    function setGroupLarge(screenName, groupId, large) {
+        const items = root.itemsFor(screenName);
+        const group = items.find(item => item.id === groupId && item.type === "group" && !item.stack);
+        if (!group || !!group.large === large)
+            return false;
+        let spot = { x: group.x, y: group.y };
+        if (large) {
+            const g = root.grid(screenName);
+            const others = items.filter(item => item.id !== groupId);
+            spot = root.freeSpot(g, others, group.x, group.y, 2);
+            if (!root.fits(g, others, spot.x, spot.y, 2)) {
+                root.error = Translation.tr("No free space for desktop shortcuts");
+                return false;
+            }
+        }
+        return root.save(screenName, items.map(item => item.id === groupId
+            ? Object.assign({}, item, { large: large, x: spot.x, y: spot.y }) : item));
+    }
+    // A group's own look over the Edit Mode default: `shape` and `color`
+    // ("" keeps the default). Anything else in `patch` is ignored.
+    function setGroupStyle(screenName, groupId, patch) {
+        const keys = ["shape", "color", "mask"];
+        return root.save(screenName, root.itemsFor(screenName).map(item => {
+            if (item.id !== groupId || item.type !== "group")
+                return item;
+            const next = Object.assign({}, item);
+            for (const k of keys) {
+                if (patch[k] === undefined)
+                    continue;
+                if (patch[k] === "")
+                    delete next[k];
+                else
+                    next[k] = patch[k];
+            }
+            return next;
+        }));
     }
 
     function application(appId) {
@@ -801,13 +1552,20 @@ Singleton {
 
     function launch(entry) {
         // Folders and plain files go to the default handler; only .desktop
-        // paths are launchable through gio directly.
-        if ((entry.type === "directory" || entry.type === "file") && entry.path)
-            Quickshell.execDetached(["xdg-open", entry.path]);
+        // paths are launchable through gio directly. An AppImage has no
+        // handler (xdg-open drops it silently), so one marked executable runs
+        // itself, as in a file manager; an unmarked one still goes to xdg-open.
+        if (entry.type === "file" && /\.appimage$/i.test(entry.path ?? ""))
+            Quickshell.execDetached(["sh", "-c", '[ -x "$1" ] && exec "$1"; exec xdg-open "$1"', "sh", entry.path]);
+        else if ((entry.type === "directory" || entry.type === "file") && entry.path)
+            // Through a link's target, so a linked folder opens where it
+            // lives rather than under Desktop/.
+            Quickshell.execDetached(["sh", "-c", 'exec xdg-open "$(readlink -f -- "$1")"', "sh", entry.path]);
         else if (entry.path)
             Quickshell.execDetached(["gio", "launch", entry.path]);
         else
             TaskbarApps.getCachedDesktopEntry(entry.id)?.execute();
+        root.launched(entry.id);
         Qt.callLater(() => root.countLaunch(entry.id));
     }
     // "Most used" is fed here: the entry, wherever it lives - loose on any
@@ -895,6 +1653,20 @@ Singleton {
         target: "desktopIcons"
         function toggleHidden(): void {
             root.setHidden(!root.hidden);
+        }
+        function refresh(): void {
+            root.scanDesktop();
+        }
+        function newFolder(): void {
+            const screen = Hyprland.focusedMonitor?.name ?? (Quickshell.screens[0]?.name ?? "eDP-1");
+            root.createFolder(screen, 100, 100);
+        }
+        function newFile(): void {
+            const screen = Hyprland.focusedMonitor?.name ?? (Quickshell.screens[0]?.name ?? "eDP-1");
+            root.createFile(screen, 100, 100);
+        }
+        function openFolder(): void {
+            root.openDesktopFolder();
         }
         function sort(by: string): void {
             const screen = Hyprland.focusedMonitor?.name ?? "";

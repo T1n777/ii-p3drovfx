@@ -52,45 +52,7 @@ Item {
         Qt.callLater(updatePopupRect);
     }
 
-    property string artDownloadLocation: Directories.coverArt
-    property string artFileName: Qt.md5(artUrl)
-    property string artFilePath: `${artDownloadLocation}/${artFileName}`
-    property bool artDownloaded: false
-
-    property string displayedArtFilePath: {
-        if (!root.artDownloaded)
-            return "";
-        if (root.artUrl.startsWith("file://"))
-            return root.artUrl;
-        return Qt.resolvedUrl(artFilePath);
-    }
-
-    onArtFilePathChanged: {
-        if (!root.artUrl || root.artUrl.length === 0) {
-            root.artDownloaded = false;
-            return;
-        }
-        if (root.artUrl.startsWith("file://")) {
-            root.artDownloaded = true;
-            return;
-        }
-        artDownloader.targetFile = root.artUrl;
-        artDownloader.artFilePath = root.artFilePath;
-        artDownloader.artTempPath = root.artFilePath + ".tmp";
-        root.artDownloaded = false;
-        artDownloader.running = true;
-    }
-
-    Process {
-        id: artDownloader
-        property string targetFile: root.artUrl
-        property string artFilePath: root.artFilePath
-        property string artTempPath: root.artFilePath + ".tmp"
-        command: ["bash", "-c", `[ -f ${artFilePath} ] || (curl -4 -sSL '${targetFile}' -o '${artTempPath}' && mv '${artTempPath}' '${artFilePath}')`]
-        onExited: {
-            root.artDownloaded = true;
-        }
-    }
+    readonly property string artSource: CoverArt.source(root.artUrl ?? "")
 
     Layout.fillHeight: true
     visible: hasTrack
@@ -146,7 +108,6 @@ Item {
             if (hoverEnabled) {
                 var globalPos = root.mapToItem(null, 0, 0);
                 GlobalStates.mediaPopupRect = Qt.rect(globalPos.x, globalPos.y, root.width, root.height);
-                GlobalStates.mediaControlsOpen = true;
             }
         }
         onExited: {
@@ -210,6 +171,13 @@ Item {
         colorMode: Config.options.bar.mediaPlayer.colorMode
     }
 
+    // A neutral step between the card and its text colour, for the secondary
+    // buttons. A palette "container" token cannot do this job: in the container
+    // modes it equals the card's own colour and the button vanishes.
+    readonly property color colSubtle: ColorUtils.mix(palette.colBackground, palette.colOnBackground, 0.86)
+    readonly property color colSubtleHover: ColorUtils.mix(palette.colBackground, palette.colOnBackground, 0.8)
+    readonly property color colSubtleActive: ColorUtils.mix(palette.colBackground, palette.colOnBackground, 0.72)
+
     // Vertical Material
     Loader {
         id: materialCol
@@ -219,7 +187,7 @@ Item {
         sourceComponent: Rectangle {
             id: cardVert
             color: palette.colBackground
-            radius: Config.options.bar.barGroupStyle === 1 ? Appearance.rounding.windowRounding : Appearance.rounding.full
+            radius: (typeof rootItem !== "undefined" ? rootItem.groupStyle : Config.options.bar.barGroupStyle) === 1 ? Appearance.rounding.windowRounding : Appearance.rounding.full
             implicitWidth: Appearance.sizes.verticalBarWidth - 8
             implicitHeight: 120 // Increased to fit all elements properly
 
@@ -249,13 +217,13 @@ Item {
 
                     StyledImage {
                         anchors.fill: parent
-                        source: root.displayedArtFilePath
+                        source: root.artSource
                         fillMode: Image.PreserveAspectCrop
                         cache: false
                         antialiasing: true
                         sourceSize.width: parent.width
                         sourceSize.height: parent.height
-                        visible: root.displayedArtFilePath !== ""
+                        visible: root.artSource !== ""
                     }
 
                     MaterialSymbol {
@@ -264,7 +232,7 @@ Item {
                         text: "music_note"
                         iconSize: Appearance.font.pixelSize.normal
                         color: palette.colOnBackground
-                        visible: root.displayedArtFilePath === ""
+                        visible: root.artSource === ""
                     }
                 }
 
@@ -303,9 +271,9 @@ Item {
                     implicitWidth: innerCol.width - 4
                     implicitHeight: innerCol.width - 4
                     buttonRadius: height / 2
-                    colBackground: palette.colContainer
-                    colBackgroundHover: palette.colContainerHover
-                    colRipple: palette.colContainerActive
+                    colBackground: root.colSubtle
+                    colBackgroundHover: root.colSubtleHover
+                    colRipple: root.colSubtleActive
                     downAction: () => root.activePlayer?.next()
                     contentItem: MaterialSymbol {
                         anchors.centerIn: parent
@@ -314,7 +282,7 @@ Item {
                         fill: 1
                         horizontalAlignment: Text.AlignHCenter
                         verticalAlignment: Text.AlignVCenter
-                        color: palette.colOnContainer
+                        color: palette.colOnBackground
                     }
                 }
             }
@@ -374,7 +342,7 @@ Item {
         sourceComponent: Rectangle {
             id: card
             color: palette.colBackground
-            radius: Config.options.bar.barGroupStyle === 1 ? Appearance.rounding.windowRounding : Appearance.rounding.full
+            radius: (typeof rootItem !== "undefined" ? rootItem.groupStyle : Config.options.bar.barGroupStyle) === 1 ? Appearance.rounding.windowRounding : Appearance.rounding.full
             implicitHeight: Appearance.sizes.baseBarHeight - 8
             height: implicitHeight
             implicitWidth: innerRow.implicitWidth + 8
@@ -429,13 +397,13 @@ Item {
 
                     StyledImage {
                         anchors.fill: parent
-                        source: root.displayedArtFilePath
+                        source: root.artSource
                         fillMode: Image.PreserveAspectCrop
                         cache: false
                         antialiasing: true
                         sourceSize.width: artRect.width
                         sourceSize.height: artRect.height
-                        visible: root.displayedArtFilePath !== ""
+                        visible: root.artSource !== ""
                     }
 
                     MaterialSymbol {
@@ -444,7 +412,7 @@ Item {
                         text: "music_note"
                         iconSize: Appearance.font.pixelSize.normal
                         color: palette.colOnBackground
-                        visible: root.displayedArtFilePath === ""
+                        visible: root.artSource === ""
                     }
                 }
 
@@ -622,9 +590,9 @@ Item {
                     implicitHeight: card.height - 6
                     Layout.leftMargin: -2
                     buttonRadius: height / 2
-                    colBackground: palette.colContainer
-                    colBackgroundHover: palette.colContainerHover
-                    colRipple: palette.colContainerActive
+                    colBackground: root.colSubtle
+                    colBackgroundHover: root.colSubtleHover
+                    colRipple: root.colSubtleActive
                     downAction: () => root.activePlayer?.next()
 
                     visible: root.hasTrack
@@ -653,7 +621,7 @@ Item {
                         text: "skip_next"
                         iconSize: Appearance.font.pixelSize.large
                         fill: 1
-                        color: palette.colOnContainer
+                        color: palette.colOnBackground
                     }
                 }
             }

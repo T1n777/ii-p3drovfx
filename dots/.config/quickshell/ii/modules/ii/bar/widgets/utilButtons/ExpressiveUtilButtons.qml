@@ -30,7 +30,7 @@ Item {
         id: pill
         anchors.centerIn: parent
         color: isMaterial ? widgetPalette.colBackground : "transparent"
-        radius: Config.options.bar.barGroupStyle === 1 ? Appearance.rounding.windowRounding : Appearance.rounding.full
+        radius: (typeof rootItem !== "undefined" ? rootItem.groupStyle : Config.options.bar.barGroupStyle) === 1 ? Appearance.rounding.windowRounding : Appearance.rounding.full
         implicitWidth: isMaterial && !root.vertical ? flow.implicitWidth + 10 : root.vertical ? Appearance.sizes.verticalBarWidth - 8 : flow.implicitWidth + 4
         implicitHeight: isMaterial && root.vertical ? flow.implicitHeight + 10 : isMaterial ? Appearance.sizes.baseBarHeight - 8 : root.vertical ? flow.implicitHeight + 4 : Appearance.sizes.baseBarHeight
 
@@ -68,6 +68,34 @@ Item {
                         fill: 1; text: "screenshot_region"
                         iconSize: Appearance.font.pixelSize.large
                         color: Appearance.colors.colOnPrimaryContainer
+                    }
+                }
+            }
+
+            Loader {
+                active: Config.options.bar.utilButtons.showLiveDraw && LiveDraw.enabled
+                visible: active
+                sourceComponent: isMaterial ? liveDrawM3 : legacyLiveDraw
+            }
+            Component {
+                id: liveDrawM3
+                UtilButton {
+                    vertical: root.vertical
+                    iconText: "draw"
+                    forceHovered: LiveDraw.trayOpen
+                    onClicked: LiveDraw.toggle()
+                }
+            }
+            Component {
+                id: legacyLiveDraw
+                CircleUtilButton {
+                    onClicked: LiveDraw.toggle()
+                    MaterialSymbol {
+                        horizontalAlignment: Qt.AlignHCenter
+                        fill: LiveDraw.trayOpen ? 1 : 0
+                        text: "draw"
+                        iconSize: Appearance.font.pixelSize.large
+                        color: Appearance.colors.colOnLayer2
                     }
                 }
             }
@@ -139,7 +167,7 @@ Item {
                         id: btn
                         anchors.left: parent.left
                         anchors.verticalCenter: parent.verticalCenter
-                        colBackground: recordingItem.isRecording ? widgetPalette.colContainer : "transparent"
+                        colBackground: recordingItem.isRecording ? widgetPalette.colBackgroundVariant : "transparent"
                         buttonRadius: recordingItem.isRecording ? Appearance.rounding.normal : implicitHeight / 2
                         onClicked: Quickshell.execDetached(recordingItem.isRecording
                             ? [Directories.recordScriptPath]
@@ -156,7 +184,7 @@ Item {
                             fill: 1
                             text: recordingItem.isRecording ? "stop" : "screen_record"
                             iconSize: Appearance.font.pixelSize.large
-                            color: recordingItem.isRecording ? widgetPalette.colBackground : Appearance.colors.colOnLayer2
+                            color: recordingItem.isRecording ? widgetPalette.colOnBackgroundVariant : Appearance.colors.colOnLayer2
                             Behavior on color { ColorAnimation { duration: 200 } }
                         }
                     }

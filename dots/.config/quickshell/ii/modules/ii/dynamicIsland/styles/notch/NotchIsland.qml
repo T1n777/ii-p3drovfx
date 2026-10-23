@@ -357,8 +357,8 @@ Scope {
      */
     readonly property bool interruptsActive: root.explicitSurfaceActive || root.hasUrgentActivity
 
-    function forceCollapse() {
-        const shown = root.pagedId;
+    function forceCollapse(shownId) {
+        const shown = shownId ?? root.pagedId;
         // Alt+Tab passing over an expanded card collapses it but does not dismiss it: the
         // island is meant to come back to what it was showing.
         const switching = controller.sources.windowSwitcher && controller.sources.windowSwitcher.active;
@@ -397,14 +397,22 @@ Scope {
         root.dashboardRequested = false;
     }
 
+    // A turn later: `interruptsActive` follows `pagedId` (through the explicit
+    // surfaces), and collapsing resets `eventId`/`eventRevealed`, which `pagedId`
+    // reads - running it inside this notification was a binding loop on `pagedId`.
+    // The face and the dashboard are read now, as the change found them.
     onInterruptsActiveChanged: {
-        if (!root.dashboardActive) {
-            root.forceCollapse();
-            if (!root.explicitSurfaceActive)
+        const shown = root.pagedId;
+        const dashboard = root.dashboardActive;
+        Qt.callLater(() => {
+            if (!dashboard) {
+                root.forceCollapse(shown);
+                if (!root.explicitSurfaceActive)
+                    root.expandSuppressed = false;
+            }
+            if (!root.explicitSurfaceActive && !hoverIntent.hovered)
                 root.expandSuppressed = false;
-        }
-        if (!root.explicitSurfaceActive && !hoverIntent.hovered)
-            root.expandSuppressed = false;
+        });
     }
 
     Connections {
@@ -536,7 +544,7 @@ Scope {
     IslandHoverIntent {
         id: hoverIntent
         // The island's own pointer only: a bubble expands itself, never the island.
-        hovered: containerHover.hovered
+        hovered: containerHover.hovered && root.pointerOnBody
         blocked: root.explicitSurfaceActive || root.expandSuppressed || root.faceClosedUnderPointer
             // A face made of buttons: the pointer is there to press one.
             || IslandRegistry.isInteractive(root.pagedId)
@@ -702,6 +710,7 @@ Scope {
      * transition - not only while search is technically active.
      */
     readonly property bool overviewVisible: root.searchActive
+        && !root.realGnome
         && LauncherSearch.query === ""
         && !root.searchPanelOwned
         && !GlobalStates.searchOnlyMode
@@ -720,6 +729,44 @@ Scope {
     readonly property int overviewColumns: 3
     /** Relative to the screen, like Config.options.overview.scale. */
     readonly property real overviewScale: 0.15
+
+    /**
+     * Real Gnome overview style: no workspace grid - the plane and its neighbours are
+     * the workspaces - so the island holds only search, and the window picker takes the
+     * free area under it. The island publishes that area for the background zoom and
+     * hosts the picker's input (the capture layer below takes none).
+     */
+    readonly property var realGnomeController: GlobalStates.overviewBackgroundControllerFor(root.targetScreen?.name ?? "")
+    readonly property bool realGnome: !!root.realGnomeController && root.realGnomeController.isRealGnome
+        && root.integratedOverview && !root.scrollingLayout
+    /** Room the workspace indicator keeps under the plane. */
+    readonly property real realGnomeIndicatorRoom: 40
+    readonly property bool realGnomeSearchOpen: root.realGnome && root.searchActive
+        && LauncherSearch.query === "" && !root.searchPanelOwned
+    onRealGnomeSearchOpenChanged: {
+        if (root.realGnomeSearchOpen)
+            realGnomeAreaTimer.restart();
+    }
+    onRealGnomeChanged: realGnomeAreaTimer.restart()
+    Timer {
+        id: realGnomeAreaTimer
+        // After the morph has settled: the island's size is final then.
+        interval: 450
+        onTriggered: {
+            if (!root.realGnomeSearchOpen || !root.targetScreen)
+                return;
+            const bottom = container.mapToItem(null, 0, container.height).y;
+            if (bottom <= 0)
+                return;
+            const screen = root.targetScreen;
+            const reserved = HyprlandData.monitors.find(m => m.name === screen.name)?.reserved ?? [0, 0, 0, 0];
+            // Clear of the island's body and its shadow.
+            const top = bottom + 12;
+            // The workspace indicator keeps the bottom strip.
+            GlobalStates.setRealGnomeArea(screen.name, Qt.rect(reserved[0], top,
+                screen.width - reserved[0] - reserved[2], screen.height - reserved[3] - root.realGnomeIndicatorRoom - top));
+        }
+    }
 
     /**
      * How the overview arrives. Integrated, it is a plain fade on the island's own
@@ -924,19 +971,20 @@ Scope {
         if (root.dashboardActive)
             return root.dashboardHeight;
         if (root.searchActive) {
-            const ovHeight = (notchContent.overviewTargetHeight > 0
+            const integratedOverviewVisible = root.integratedOverview && root.overviewVisible;
+            const ovHeight = (root.integratedOverview && notchContent.overviewTargetHeight > 0
                 ? notchContent.overviewTargetHeight + notchContent.overviewGap
                 : 0) + 54;
             // When query is empty and no panel is active, we are in (or returning to) overview: target is immediately the overview height.
-            // Only while the overview is actually shown: with it disabled the loader still reports a
-            // height, and the island opened as a tall empty box.
-            if (LauncherSearch.query === "" && !root.searchPanelOwned && root.overviewVisible)
+            // Only while the overview is actually shown inside the island: with it disabled or external
+            // the loader still reports a height, and the island opened as a tall empty box.
+            if (LauncherSearch.query === "" && !root.searchPanelOwned && integratedOverviewVisible)
                 return Math.min(root.heightCap, ovHeight);
 
             const wanted = notchContent.searchTargetHeight;
             const search = wanted > 0 ? wanted : 54;
             // While searching, hold at least ovHeight while overview is fading out so it doesn't dip
-            const holdingOverview = root.overviewVisible || root.overviewFade > 0.001;
+            const holdingOverview = root.integratedOverview && (root.overviewVisible || root.overviewFade > 0.001);
             return Math.min(root.heightCap, holdingOverview ? Math.max(search, ovHeight) : search);
         }
         if (root.wallpaperActive) {
@@ -972,8 +1020,95 @@ Scope {
      * Deliberately small: it is a transition into the bezel, not a feature of its own.
      * The old shape derived this from the corner radius, which made every rounding
      * change also change the island's width.
+     *
+     * The sculpted shell is the exception on purpose: its flare *is* the feature, a
+     * long S reaching well past the body on each side, so it reserves that reach the
+     * same way and every width measured elsewhere still means the straight body.
      */
-    readonly property real filletSize: Appearance.rounding.verysmall
+    readonly property real filletSize: root.sculptedOpen ? root.sculptWing + root.sculptPad : Appearance.rounding.verysmall
+
+    /**
+     * The sculpted shell's S, sized from the resting face so the curve keeps its
+     * proportions whatever height the island is set to: the flare reaches out
+     * `sculptWing` past the body, the bottom corner eases back in over `sculptFoot`.
+     */
+    readonly property bool sculptedShape: IslandPolicy.shape === "sculpted"
+    /** The S only exists where the shell meets an edge; below a top bar it is a plain notch. */
+    readonly property bool sculptedFlare: root.sculptedShape && root.attachedToEdge
+    /**
+     * The dashboard is a grid of tiles reaching into every corner: it wears the
+     * default shell, wings folded and the foot back to the body's radius, rather
+     * than an S cutting into its corner tiles.
+     */
+    readonly property bool sculptedOpen: root.sculptedFlare && !root.dashboardActive
+    readonly property real sculptWing: Math.round(root.restingHeight * 1.25)
+    readonly property real sculptFoot: Math.round(root.restingHeight * 1.1)
+    /**
+     * Side room for the activities' own faces taller than the resting one
+     * (notifications, Bluetooth, battery, live activities): the S's foot eases in
+     * much further than a corner radius, and content laid out edge to edge ran into
+     * it. Part of the reserve only - the S itself stays where it is, so the body
+     * simply grows by the margin. Never for the surfaces the island hosts (dashboard,
+     * search, wallpapers, session, askpass, switcher, overview): they size themselves
+     * to the screen and are used, not glanced at.
+     */
+    readonly property real sculptPad: root.sculptedOpen && !root.explicitSurfaceActive
+        && root.targetHeight > root.restingHeight + 2
+        ? Math.round(root.sculptFoot * 0.6) : 0
+    /**
+     * How far the sculpted shell is unfolded, animated: the layout reserve
+     * (`filletSize`) moves at once and the container's width already animates it,
+     * but the drawn wings and foot have no Behavior of their own to ride.
+     */
+    property real sculptAmount: root.sculptedOpen ? 1 : 0
+    Behavior on sculptAmount {
+        animation: Appearance.animation.elementMove.numberAnimation.createObject(this)
+    }
+    /**
+     * The sculpted shell's bubbles sit low beside the body - under the wing, where
+     * there is room - but never past the island's bottom: the bubble's lower edge
+     * lines up with the resting body's.
+     */
+    readonly property real sculptBubbleDrop: root.sculptedFlare
+        ? Math.max(0, Math.floor((root.restingHeight - root.bubbleDiameter) / 2)) : 0
+    /**
+     * Extra air beside the body so the bubble clears the wing above it: the S is
+     * measured, not guessed - every height the circle spans is checked against the
+     * resting silhouette (`sculptReference`), so it follows the island's height,
+     * the bubble's size and the curve's tuning alike.
+     */
+    readonly property real sculptBubbleNudge: {
+        if (!root.sculptedFlare || !sculptReference.sculptedGeometry)
+            return 0;
+        const r = root.bubbleDiameter / 2;
+        const cy = root.restingHeight / 2 + root.sculptBubbleDrop;
+        const bodyHalf = sculptReference.width / 2 - sculptReference.clampedShoulder;
+        const clearance = 5;
+        const base = Math.max(8, Appearance.sizes.hyprlandGapsOut) + r;
+        let need = 0;
+        for (let i = 0; i <= 16; i++) {
+            const y = Math.max(0, cy - r) + (Math.min(cy + r, root.restingHeight) - Math.max(0, cy - r)) * i / 16;
+            const out = sculptReference.halfWidthAt(y) - bodyHalf;
+            const dy = y - cy;
+            need = Math.max(need, out + clearance + Math.sqrt(Math.max(0, r * r - dy * dy)));
+        }
+        return Math.max(0, Math.ceil(need - base));
+    }
+
+    /** The resting silhouette, never drawn: what the bubbles' placement measures. */
+    NotchShape {
+        id: sculptReference
+        visible: false
+        width: 2 * root.sculptWing + 200
+        height: root.restingHeight
+        shoulder: root.sculptWing
+        attached: true
+        sculpted: root.sculptedFlare
+        flareDepth: root.restingHeight / 2
+        foot: root.sculptFoot
+        bottomRadius: Math.min(root.restingHeight / 2, Appearance.rounding.large)
+        slant: 1
+    }
 
     /**
      * The body's rounding: a capsule while short, a card once tall - one
@@ -1051,7 +1186,7 @@ Scope {
         // The same check the bar and the screen corners use, for the same reasons:
         // it counts a fullscreen window on the special workspace - a scratchpad
         // pulled over the monitor - and it reads the client list rather than a
-        // workspace's own toplevels, which the compactor's renumbering leaves
+        // workspace's own toplevels, which the arranger's renumbering leaves
         // stale. The old local scan of `Hyprland.workspaces` saw neither, so a
         // fullscreen video in the scratchpad left the island sitting on top of it.
         return HyprlandData.monitorHasFullscreenWindow(win.screen.name);
@@ -1672,6 +1807,9 @@ Scope {
     }
     readonly property bool anyBubbleHovered: root.bubblePointers.some(over => over === true)
 
+    /** A bubble under the pointer always wins over the island around it. */
+    readonly property bool pointerOnBody: !root.anyBubbleHovered
+
     property var bubbleReaches: []
     function noteBubbleReach(index, right, left) {
         const current = root.bubbleReaches[index];
@@ -1708,7 +1846,7 @@ Scope {
     /** A bar widget's size: the resting pill's height, in the bar or floating. */
     readonly property real bubbleDiameter: root.centerInBar ? root.pillRestHeight : IslandMotion.pillHeight - 6
     // Clear air between the two, even with tight window gaps.
-    readonly property real bubbleGap: Math.max(8, Appearance.sizes.hyprlandGapsOut)
+    readonly property real bubbleGap: Math.max(8, Appearance.sizes.hyprlandGapsOut) + root.sculptBubbleNudge
     /** The height the bubble lines up with: the island's resting face, not whatever it grew to. */
     readonly property real bubbleRestHeight: (root.centerInBar && root.pillShape) ? root.pillRestHeight : IslandMotion.pillHeight
 
@@ -1829,7 +1967,8 @@ Scope {
                 // maskTarget already covers.
                 const outsideGrid = root.overviewVisible
                     && (root.scrollingLayout || !root.integratedOverview);
-                return outsideGrid ? fullWindow : maskTarget;
+                // Real Gnome's window picker sits under the island and takes the pointer.
+                return outsideGrid || root.realGnomeSearchOpen ? fullWindow : maskTarget;
             }
             // The bubbles take the pointer too, so hovering one can open the island.
             regions: root.bubbleMaskRegions
@@ -1856,6 +1995,66 @@ Scope {
                     GlobalStates.closeOverview();
                 }
             }
+
+            // Window coordinates are screen coordinates: the window spans the screen.
+            Loader {
+                anchors.fill: parent
+                active: root.realGnome
+                sourceComponent: RealGnomeWindowPicker {
+                    screenName: root.targetScreen?.name ?? ""
+                    shown: GlobalStates.overviewOpen && root.realGnomeSearchOpen
+                        && GlobalStates.activeSearchQuery === "" && !GlobalStates.searchPanelActive
+                        && !!root.realGnomeController && root.realGnomeController.progress > 0.9
+                }
+            }
+
+            Loader {
+                active: root.realGnome
+                readonly property var reserved: HyprlandData.monitors.find(m => m.name === (root.targetScreen?.name ?? ""))?.reserved ?? [0, 0, 0, 0]
+                anchors.horizontalCenter: parent.horizontalCenter
+                y: parent.height - reserved[3] - root.realGnomeIndicatorRoom / 2 - (item ? item.height / 2 : 0)
+                sourceComponent: RealGnomeWorkspaceIndicator {
+                    screenName: root.targetScreen?.name ?? ""
+                    shown: GlobalStates.overviewOpen && root.realGnomeSearchOpen
+                        && GlobalStates.activeSearchQuery === "" && !GlobalStates.searchPanelActive
+                        && !!root.realGnomeController && root.realGnomeController.progress > 0.6
+                }
+            }
+        }
+
+        // Moving the pointer to another monitor takes the focus - and so the grab -
+        // away from this window, which used to read as a click away and closed the
+        // search with the overview. With several monitors the clear is judged a
+        // beat later: if the focused monitor changed meanwhile it was only a hop,
+        // so the overview stays and the grab is taken again on the new monitor.
+        property double monitorHopAt: 0
+        property double grabClearedAt: 0
+        property string grabClearedMonitor: ""
+        property bool grabSuspended: false
+        Connections {
+            target: Hyprland
+            function onFocusedMonitorChanged() {
+                win.monitorHopAt = Date.now();
+            }
+        }
+        Timer {
+            id: grabClearJudge
+            interval: 140
+            onTriggered: {
+                const now = Hyprland.focusedMonitor?.name ?? "";
+                const hopped = now !== win.grabClearedMonitor || win.monitorHopAt >= win.grabClearedAt - 250;
+                if (hopped && root.searchActive) {
+                    win.grabSuspended = true;
+                    grabRearm.restart();
+                } else if (root.searchActive) {
+                    GlobalStates.closeOverview();
+                }
+            }
+        }
+        Timer {
+            id: grabRearm
+            interval: 120
+            onTriggered: win.grabSuspended = false
         }
 
         HyprlandFocusGrab {
@@ -1868,9 +2067,9 @@ Scope {
             // editing: it pins the island against the pointer leaving, not against a click.
             // The wallpaper browser needs it too: the surface is only OnDemand, so
             // without the grab it had no keyboard until it was clicked.
-            active: root.searchActive || root.sessionActive || root.wallpaperActive
+            active: !win.grabSuspended && (root.searchActive || root.sessionActive || root.wallpaperActive
                 || (root.dashboardActive && !notchContent.dashboardGridEditing)
-                || (root.askpassActive && root.askpassFocused)
+                || (root.askpassActive && root.askpassFocused))
             // A menu is a question put to the pointer, so clicking away is an answer -
             // and so is clicking away from the launcher, as it is everywhere else the
             // launcher is drawn.
@@ -1881,8 +2080,15 @@ Scope {
                     root.askpassFocused = false;
                 if (root.sessionActive)
                     GlobalStates.sessionOpen = false;
-                if (root.searchActive)
-                    GlobalStates.closeOverview();
+                if (root.searchActive) {
+                    if (Quickshell.screens.length > 1) {
+                        win.grabClearedAt = Date.now();
+                        win.grabClearedMonitor = Hyprland.focusedMonitor?.name ?? "";
+                        grabClearJudge.restart();
+                    } else {
+                        GlobalStates.closeOverview();
+                    }
+                }
                 if (root.wallpaperActive)
                     GlobalStates.wallpaperSelectorOpen = false;
                 if (root.dashboardActive && !notchContent.dashboardGridEditing) {
@@ -1940,7 +2146,7 @@ Scope {
                 // stuck at the top. Riding the reveal clock off past the edge makes
                 // the recall complete out of sight; floating and pill shapes need no
                 // offset because their containers already slide above the edge.
-                centerY: container.y + container.scale * Math.min(container.height, root.bubbleRestHeight) / 2
+                centerY: container.y + container.scale * (Math.min(container.height, root.bubbleRestHeight) / 2 + root.sculptBubbleDrop)
                     - (root.centerInBar ? (1 - root.centerBarProgress) * root.bubbleDiameter : 0)
                 bodyCenterX: container.x + container.width / 2
                 bodyTop: container.y
@@ -1951,6 +2157,7 @@ Scope {
                 reservedLeft: container.x + container.width / 2 - IslandGeometry.centerWidth / 2
                 surfaceColor: notchBody.color
                 shadowEnabled: notchBody.layer.enabled
+                cutAtEdge: root.sculptedFlare
                 onExpandRequested: activityId => root.requestBubbleExpand(activityId)
                 onCollapseRequested: activityId => root.requestBubbleCollapse(activityId)
                 onPointerChanged: over => root.noteBubblePointer(index, over)
@@ -1963,9 +2170,34 @@ Scope {
         Item {
             id: container
 
+            ShellRegionTarget {
+                target: container
+                label: Translation.tr("Dynamic Island")
+                namespace: "quickshell:floatingNotch"
+            }
+
             anchors.horizontalCenter: parent.horizontalCenter
             // Opacity keeps input, so the faded island still answers hover.
             opacity: root.oledFade
+
+            /**
+             * The sculpted island is its S, not its bounding box.
+             *
+             * The wings leave whole triangles of the box empty beside the body, and
+             * that is exactly where the bubbles rest. Hover goes to the topmost item
+             * under the pointer that wants it, so the container's HoverHandler took
+             * the pointer over a bubble and the bubble's own handler, underneath,
+             * never fired. Outside the curve the container is not under the pointer
+             * at all: hover and clicks fall through to the bubble (or the desktop).
+             */
+            containmentMask: root.sculptedFlare ? sculptedHitMask : null
+            QtObject {
+                id: sculptedHitMask
+                function contains(point: point): bool {
+                    return point.y >= 0 && point.y <= container.height
+                        && Math.abs(point.x - container.width / 2) <= notchBody.halfWidthAt(point.y);
+                }
+            }
 
             /**
              * The swell, as a transform rather than geometry. The bubbles and the bar
@@ -2182,6 +2414,7 @@ Scope {
             readonly property bool returningToOverview: root.searchActive
                 && LauncherSearch.query === ""
                 && !root.searchPanelOwned
+                && root.integratedOverview
                 && root.overviewVisible
                 && container.animatedHeight > ((notchContent.overviewTargetHeight > 0 ? notchContent.overviewTargetHeight + notchContent.overviewGap : 0) + 54 + 10)
 
@@ -2283,12 +2516,21 @@ Scope {
                 // The shoulder inset is reserved while floating too: the body that
                 // the clip, the mask and the bubbles measure is the straight part,
                 // and it must not change with the shell.
-                shoulder: root.filletSize
+                // The S's wing only: the reserve also carries the sculpted margin.
+                shoulder: root.sculptedFlare
+                    ? Appearance.rounding.verysmall + (root.sculptWing - Appearance.rounding.verysmall) * root.sculptAmount
+                    : root.filletSize
                 attached: root.attachedToEdge
                 topRadius: root.attachedToEdge ? 0 : root.bodyRadius
                 bottomRadius: root.bodyRadius
+                sculpted: root.sculptedFlare
+                flareDepth: Appearance.rounding.verysmall + (root.restingHeight / 2 - Appearance.rounding.verysmall) * root.sculptAmount
+                foot: root.bodyRadius + (root.sculptFoot - root.bodyRadius) * root.sculptAmount
+                // The full S while resting; a growing face stands its sides up.
+                slant: Math.max(0, Math.min(1, 2 - container.height / root.restingHeight)) * root.sculptAmount
 
-                color: Config.options.bar.expressiveColors
+                color: Config.options.bar.amoledBackground ? "#000000"
+                    : Config.options.bar.expressiveColors
                     ? barThemes.getTheme(Config.options.bar.expressiveColorTheme).barBackground
                     : Appearance.colors.colLayer0
 
@@ -2414,7 +2656,7 @@ Scope {
             TapHandler {
                 acceptedButtons: Qt.LeftButton
                 enabled: root.clickToExpand && !root.explicitSurfaceActive && !root.expandSuppressed
-                    && !root.faceClosedUnderPointer
+                    && !root.faceClosedUnderPointer && root.pointerOnBody
                 onTapped: {
                     if (!notchContent.faceControlHovered)
                         root.clickedExpanded = !root.clickedExpanded;
@@ -2427,7 +2669,7 @@ Scope {
             TapHandler {
                 acceptedButtons: Qt.LeftButton
                 enabled: !root.clickToExpand && root.inBodyExpanded && !root.dashboardActive
-                    && IslandRegistry.bodyClickOpensDashboard(root.pagedId)
+                    && IslandRegistry.bodyClickOpensDashboard(root.pagedId) && root.pointerOnBody
                 onTapped: {
                     if (!notchContent.faceControlHovered)
                         root.dashboardClicked = true;
@@ -2441,14 +2683,23 @@ Scope {
                 visible: false
                 layer.enabled: true
 
-                Rectangle {
-                    anchors.fill: parent
-                    antialiasing: true
+                // The silhouette itself, in every shell: one item that only changes its
+                // properties. Two children swapped by `visible` under this hidden layer
+                // left the mask empty after a shape change (the re-shown one never
+                // reached the layer), and with it everything the island shows.
+                NotchShape {
+                    x: -contentClip.x
+                    width: notchBody.width
+                    height: parent.height
+                    shoulder: notchBody.shoulder
+                    attached: notchBody.attached
+                    topRadius: notchBody.topRadius
+                    bottomRadius: notchBody.bottomRadius
+                    sculpted: notchBody.sculpted
+                    flareDepth: notchBody.flareDepth
+                    foot: notchBody.foot
+                    slant: notchBody.slant
                     color: "black"
-                    topLeftRadius: notchBody.topRadius
-                    topRightRadius: notchBody.topRadius
-                    bottomLeftRadius: notchBody.bodyRadius
-                    bottomRightRadius: notchBody.bodyRadius
                 }
             }
 
@@ -2498,8 +2749,8 @@ Scope {
                     // The workspace overview, drawn inside the body under the search
                     // field; see NotchContent.overviewVisible.
                     overviewVisible: root.integratedOverview && root.overviewVisible
-                    overviewBuilt: root.overviewBuilt && !root.scrollingLayout
-                    overviewFade: root.overviewFade
+                    overviewBuilt: root.overviewBuilt && !root.scrollingLayout && root.integratedOverview
+                    overviewFade: root.integratedOverview ? root.overviewFade : 0
                     overviewRows: root.overviewRows
                     overviewColumns: root.overviewColumns
                     overviewScale: root.overviewScale

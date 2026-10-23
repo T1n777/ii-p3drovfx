@@ -1,6 +1,7 @@
 import qs
 import qs.services
 import qs.modules.common
+import qs.modules.common.widgets
 import QtQuick
 import Quickshell.Io
 import Quickshell
@@ -12,9 +13,11 @@ Scope {
     property int sidebarWidth: Appearance.sizes.sidebarWidth
 
     // Keep the lightweight panel controller alive, but make the expensive dashboard
-    // tree obey the user's keep-alive preference.
+    // tree obey the user's keep-alive preference. It is wanted until the slide out has
+    // finished (a drag open asks for it too), then kept hidden for a minute.
     readonly property bool keepContentLoaded: Config.ready && Config.options.sidebar.keepRightSidebarLoaded
-    readonly property bool contentWanted: GlobalStates.sidebarRightOpen || root.keepContentLoaded
+    readonly property bool contentWanted: GlobalStates.sidebarRightOpen || GlobalStates.dashboardSlideProgress > 0
+        || root.keepContentLoaded
 
     readonly property bool isOnRight: {
         const pos = Config.options.sidebar.position;
@@ -22,8 +25,19 @@ Scope {
     }
 
     // The surface starts at the screen edge; the open content stops beside the bar.
-    readonly property real effectiveBarOffset: BarPlacement.vertical && GlobalStates.barOpen && (BarPlacement.bottom === root.isOnRight)
-        ? Appearance.sizes.verticalBarWindowWidth : 0
+    // Ignoring every zone (to keep the bar off) also ignores a pinned dock on this edge,
+    // which lies beside the bar: the open content stops beside the dock as well.
+    readonly property bool ignoresZones: BarPlacement.vertical && (BarPlacement.bottom === root.isOnRight)
+    readonly property var dockInset: GlobalStates.dockInsets[root.isOnRight ? GlobalStates.effectiveRightMonitor : GlobalStates.effectiveLeftMonitor] ?? null
+    readonly property real sideDockInset: (root.ignoresZones && root.dockInset && root.dockInset.side === (root.isOnRight ? "right" : "left"))
+        ? (root.dockInset.reserved ?? 0) : 0
+    // Respecting the zones, the surface began beside a pinned dock on this edge and slid
+    // out from under it. It takes the dock's strip back (a negative margin) so the slide
+    // starts at the screen edge like it does with no dock, and the content stops beside it.
+    readonly property real dockReclaim: (!root.ignoresZones && root.dockInset && root.dockInset.side === (root.isOnRight ? "right" : "left"))
+        ? (root.dockInset.reserved ?? 0) : 0
+    readonly property real effectiveBarOffset: (BarPlacement.vertical && GlobalStates.barOpen && (BarPlacement.bottom === root.isOnRight)
+        ? Appearance.sizes.verticalBarWindowWidth : 0) + root.sideDockInset + root.dockReclaim
 
     // Loader guard: PanelWindow (Wayland surface) is never created in connect mode,
     // except in Float+Connect mode (cornerStyle 1) where sidebars remain separate.
@@ -49,6 +63,10 @@ Scope {
             // sentinel directly so the bar cannot push this surface off the screen edge.
             exclusiveZone: BarPlacement.vertical && (BarPlacement.bottom === root.isOnRight) ? -1 : 0
             implicitWidth: sidebarWidth + root.effectiveBarOffset
+            margins {
+                left: root.isOnRight ? 0 : -root.dockReclaim
+                right: root.isOnRight ? -root.dockReclaim : 0
+            }
             // Keep the bar clickable without clipping the slide drawn over its strip.
             mask: Region {
                 x: root.isOnRight ? 0 : root.effectiveBarOffset
@@ -110,10 +128,19 @@ Scope {
                 }
             }
 
-            Loader {
+            // Loaders take no child objects, so the marker sits beside it.
+            ShellRegionTarget {
+                target: sidebarContentLoader.item
+                label: Translation.tr("Sidebar")
+            }
+
+            RetainedLoader {
                 id: sidebarContentLoader
 
-                active: root.contentWanted
+                requested: root.contentWanted
+                retainFor: 60000
+                // The slide in must find the content already built.
+                asynchronous: false
                 sourceComponent: SidebarDashboardContent {
                     keepWarm: root.keepContentLoaded
                 }

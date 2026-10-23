@@ -11,7 +11,12 @@ DropArea {
     property bool available: true
     enabled: available && PanelFamily.isIi && !GlobalStates.screenLocked
         && !GlobalStates.isMediaModeActiveForScreen(screenName)
-    keys: ["application/x-ii-desktop-shortcut", "text/uri-list"]
+        && !DesktopShortcuts.hidden
+    keys: ["application/x-ii-desktop-item", "application/x-ii-desktop-shortcut", "text/uri-list"]
+
+    function isDesktopItem(event) {
+        return event.formats.indexOf("application/x-ii-desktop-item") !== -1;
+    }
 
     function pointFor(event) {
         return root.iconsLayer ? root.iconsLayer.mapFromItem(root, event.x, event.y) : Qt.point(event.x, event.y);
@@ -22,12 +27,43 @@ DropArea {
             root.iconsLayer.dropTargetId = root.iconsLayer.targetAt(p.x, p.y, "");
         }
     }
-    onEntered: event => root.updateTarget(event)
-    onPositionChanged: event => root.updateTarget(event)
-    onExited: { if (iconsLayer) iconsLayer.dropTargetId = ""; }
+    // A desktop icon's own drag follows through the layer that started it,
+    // which owns the merge target and the landing ghost.
+    function follow(event) {
+        if (root.isDesktopItem(event)) {
+            if (root.iconsLayer)
+                root.iconsLayer.systemDragMove(root.pointFor(event));
+            return;
+        }
+        root.updateTarget(event);
+    }
+    onEntered: event => root.follow(event)
+    onPositionChanged: event => root.follow(event)
+    onExited: {
+        if (iconsLayer) {
+            iconsLayer.dropTargetId = "";
+            iconsLayer.systemDragLeave();
+        }
+    }
     onDropped: event => root.handleDrop(event)
     function handleDrop(event) {
         const p = root.pointFor(event);
+        if (root.isDesktopItem(event)) {
+            if (root.iconsLayer && root.iconsLayer.systemDragDrop(p)) {
+                event.accept(Qt.MoveAction);
+                return;
+            }
+            try {
+                const data = JSON.parse(event.getDataAsString("application/x-ii-desktop-item"));
+                if (data.screen && data.screen !== root.screenName) {
+                    DesktopShortcuts.moveToScreen(data.screen, root.screenName, data.ids);
+                    event.accept(Qt.MoveAction);
+                }
+            } catch (error) {
+                console.warn("[DesktopShortcuts] Invalid desktop item drop:", error);
+            }
+            return;
+        }
         const target = root.iconsLayer?.dropTargetId ?? "";
         if (root.iconsLayer)
             root.iconsLayer.dropTargetId = "";
@@ -38,9 +74,8 @@ DropArea {
         if (event.formats.indexOf("application/x-ii-desktop-shortcut") !== -1) {
             try {
                 const data = JSON.parse(event.getDataAsString("application/x-ii-desktop-shortcut"));
-                const apps = Array.isArray(data.apps) ? data.apps.map(id => DesktopShortcuts.application(id)).filter(app => app !== null) : [];
-                const entries = data.type === "group" ? [{ id: "group:" + Date.now(), type: "group", name: data.name || "", apps: apps }] : apps;
-                if (entries.length && DesktopShortcuts.add(root.screenName, entries, x, y, target, w, h))
+                const appIds = Array.isArray(data.apps) ? data.apps : (data.id ? [data.id] : []);
+                if (appIds.length > 0 && DesktopShortcuts.addDockApps(root.screenName, appIds, x, y))
                     event.accept(Qt.CopyAction);
             } catch (error) {
                 console.warn("[DesktopShortcuts] Invalid dock drop:", error);

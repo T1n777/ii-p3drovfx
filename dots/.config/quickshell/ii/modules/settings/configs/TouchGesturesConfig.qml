@@ -339,6 +339,7 @@ Item {
             readonly property var defaults: ({
                     "fasterTouchpadScroll": false,
                     "touchpadScrollFactor": 450,
+                    "touchpadKinetic": true,
                     "mouseScrollFactor": 120,
                     "uniformMouseWheel": false,
                     "mouseScrollDeltaThreshold": 120
@@ -380,6 +381,24 @@ Item {
                 spacing: Appearance.sizes.elevationMargin / 2
 
                 ConfigSwitch {
+                    id: kineticSwitch
+                    buttonIcon: "moving"
+                    text: Translation.tr("Touchpad kinetic scrolling")
+                    description: Translation.tr("The content keeps gliding for a moment after the fingers lift. Off: it stops where the fingers stop.")
+                    Binding {
+                        target: kineticSwitch
+                        property: "checked"
+                        value: scrollingSection.opts?.touchpadKinetic ?? true
+                        when: !writeTimer.running
+                        restoreMode: Binding.RestoreNone
+                    }
+                    onCheckedChanged: {
+                        if (Config.ready && scrollingSection.opts && checked !== scrollingSection.opts.touchpadKinetic)
+                            scrollingSection.queueWrite("touchpadKinetic", checked);
+                    }
+                }
+
+                ConfigSwitch {
                     id: fasterSwitch
                     buttonIcon: "speed"
                     text: Translation.tr("Faster touchpad scrolling")
@@ -409,8 +428,8 @@ Item {
                     from: 45
                     to: 900
                     stepSize: 22.5
-                    stopIndicatorValues: [450]
-                    badgeText: Math.round(value / 4.5) + "%"
+                    stopIndicatorValues: [ScrollWheel.touchpadSpeedDefault]
+                    badgeText: Math.round(value / ScrollWheel.touchpadSpeedDefault * 100) + "%"
                     tooltipContent: badgeText
                     Binding {
                         target: touchpadSpeedSlider
@@ -486,11 +505,10 @@ Item {
                         clip: true
                         contentWidth: width
                         contentHeight: testColumn.implicitHeight
-                        onWheelScrolled: (angleDelta, pixelDelta) => {
-                            const isMouse = Math.abs(angleDelta) >= testFlickable.mouseScrollDeltaThreshold;
-                            scrollTestPad.readout = isMouse
-                                ? Translation.tr("Detected: mouse wheel · step %1").arg(Math.abs(angleDelta))
-                                : Translation.tr("Detected: touchpad · step %1").arg(Math.abs(angleDelta));
+                        onWheelScrolled: (step, notch) => {
+                            scrollTestPad.readout = notch
+                                ? Translation.tr("Detected: mouse wheel · %1 px per notch").arg(Math.round(Math.abs(step)))
+                                : Translation.tr("Detected: touchpad · %1 px per event").arg(Math.abs(step).toFixed(1));
                         }
 
                         ColumnLayout {

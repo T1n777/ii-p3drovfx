@@ -195,9 +195,9 @@ Scope {
     RetainedLoader {
         id: cheatsheetLoader
         // Keep the window chrome and only the last selected tab.
-        // With caching disabled, closing releases the window immediately.
+        // With caching disabled, the closed window is kept for a minute, then released.
         requested: root.activeState || root.cachePrepared
-        retainFor: 0
+        retainFor: 60000
 
         sourceComponent: PanelWindow {
             id: cheatsheetRoot
@@ -410,6 +410,12 @@ Scope {
 
                 Rectangle {
                     id: cheatsheetBackground
+
+                    ShellRegionTarget {
+                        target: cheatsheetBackground
+                        label: Translation.tr("Cheatsheet")
+                        namespace: "quickshell:cheatsheet"
+                    }
                     anchors.centerIn: parent
                     color: Appearance.colors.colLayer0
                     radius: Appearance.rounding.windowRounding
@@ -734,10 +740,15 @@ Scope {
                                     // inserts children and adjusts its own index.
                                     readonly property bool isCurrent: cheatsheetRoot.selectedTab === index
                                     // Selection replaces the cache; closing preserves it.
-                                    active: isCurrent && (root.activeState || root.cachePrepared)
+                                    active: isCurrent && (root.activeState || root.cachePrepared || cheatsheetLoader.retained)
                                     visible: isCurrent && root.activeState
                                     enabled: isCurrent && root.activeState && GlobalStates.cheatsheetOpen
-                                    asynchronous: true
+                                    // Only the hidden preload incubates. While anything
+                                    // animates (the tab indicator, at least) the window's
+                                    // incubation controller grants about a third of each
+                                    // frame, so a page asked for on screen took 3-4x its
+                                    // build cost in wall time; one pass is far shorter.
+                                    asynchronous: !root.activeState
 
                                     // Readiness can change again inside a loaded module
                                     // (e.g. Keybinds navigation). Only its first ready
@@ -784,6 +795,14 @@ Scope {
                                         property: "keyNavTarget"
                                         value: cheatsheetBackground
                                         when: tabDelegate.status === Loader.Ready && tabDelegate.item.hasOwnProperty("keyNavTarget")
+                                    }
+
+                                    // Pages with nested loaders follow the same rule.
+                                    Binding {
+                                        target: tabDelegate.item
+                                        property: "incubateAsync"
+                                        value: tabDelegate.asynchronous
+                                        when: tabDelegate.status === Loader.Ready && tabDelegate.item.hasOwnProperty("incubateAsync")
                                     }
 
                                     Binding {

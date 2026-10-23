@@ -167,7 +167,8 @@ PanelWindow {
         id: overviewController
         active: (Config.options.background.useBackgroundOverviewAlways ?? false)
             || bgRoot.lockEffectRequested
-            || (GlobalStates.overviewBackgroundActive && bgRoot.isMonitorFocused)
+            || (GlobalStates.overviewBackgroundActive && (bgRoot.isMonitorFocused || bgRoot.mirroredOverview))
+            || (Boolean(Config.options.background?.zoomOutEnabled) && bgRoot.scratchpadOpenOnMonitor)
         // Only where the overview is what would zoom this wallpaper in the first place.
         held: GlobalStates.overviewDragging && bgRoot.isMonitorFocused && !bgRoot.lockEffectRequested
             && !GlobalStates.overviewUsesAppDrawer && Config.options.background.zoomOutEnabled
@@ -176,6 +177,7 @@ PanelWindow {
         heldProgress: GlobalStates.gestureDragProgress
         style: bgRoot.lockEffectActive ? bgRoot.lockEffectStyle : Config.options.background.overviewBackgroundStyle
         lockDriven: bgRoot.lockEffectActive
+        openHold: GlobalStates.overviewZoomHeld && (bgRoot.isMonitorFocused || bgRoot.mirroredOverview) && !bgRoot.lockEffectActive
         legacyStyle: Config.options.background.zoomOutStyle
         videoEffectsDisabled: bgRoot.videoEffectsDisabled
         screenWidth: bgRoot.screen.width
@@ -195,6 +197,11 @@ PanelWindow {
         // on screen.
         scrollingTarget: bgRoot.lockEffectActive ? Qt.rect(0, 0, 0, 0)
             : GlobalStates.scrollingOverviewTargets[bgRoot.screen?.name ?? ""] ?? Qt.rect(0, 0, 0, 0)
+        realGnomeArea: {
+            const name = bgRoot.screen?.name ?? "";
+            const area = GlobalStates.realGnomeAreaFor(name) ?? Persistent.states.overview?.realGnomeAreas?.[name];
+            return area ? Qt.rect(area.x, area.y, area.width, area.height) : Qt.rect(0, 0, 0, 0);
+        }
     }
 
     readonly property bool isGnomeLikeOverview: overviewController.isGnomeLike
@@ -245,7 +252,7 @@ PanelWindow {
             activeId = GlobalStates._editSavedWorkspace;
         else if (activeId > 1000000)
             activeId = 2147483647 - activeId;
-        return HyprlandData.windowList.some(function(w) { return w.workspace.id === activeId; });
+        return HyprlandData.windowList.some(function(w) { return HyprlandData.sameWorkspace(w.workspace.id, activeId); });
     }
     // Deferred to avoid Wayland dispatch reentrancy crash in PanelWindow visibility
     property bool deferredFullscreen: false
@@ -260,6 +267,16 @@ PanelWindow {
 
     // Workspaces calculations
     property HyprlandMonitor monitor: Hyprland.monitorFor(modelData)
+    readonly property var thisMonitorData: {
+        const monName = bgRoot.monitor?.name ?? (bgRoot.screen?.name ?? "");
+        return (HyprlandData.monitors ?? []).find(m => m.name === monName) ?? null;
+    }
+    readonly property bool scratchpadOpenOnMonitor: {
+        const spec = bgRoot.thisMonitorData?.specialWorkspace;
+        return Boolean(spec && spec.name !== "" && (spec.id ?? 0) !== 0);
+    }
+    // Real Gnome shows the overview on every monitor, not just the focused one.
+    readonly property bool mirroredOverview: GlobalStates.realGnomeMirrored && overviewController.isRealGnome
     readonly property bool isMonitorFocused: Quickshell.screens.length <= 1 || ((Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : "") == (monitor ? monitor.name : ""))
     readonly property bool loopEnabled: !videoEffectsDisabled && Config.options.background.parallax.loop
     readonly property var intensitySpans: [20, 15, 12, 10, 8, 7, 5, 4, 3, 2]
@@ -680,6 +697,7 @@ PanelWindow {
 
     Component.onCompleted: {
         GlobalStates.registerOverviewBackgroundController(bgRoot.screen ? bgRoot.screen.name : "", overviewController);
+        DepthEffect.registerPlane(bgRoot.screen ? bgRoot.screen.name : "", wallpaperImage);
         bgRoot.publishFramingGeometry();
         // Do not re-run matugen / switchwall on quickshell reload/startup.
         // Theme colors and wallpaper are already persisted on disk.
@@ -694,6 +712,7 @@ PanelWindow {
             MusicVideoService.stopVideo();
         bgRoot.releaseMediaModeRegistration();
         GlobalStates.unregisterOverviewBackgroundController(bgRoot.screen ? bgRoot.screen.name : "", overviewController);
+        DepthEffect.unregisterPlane(bgRoot.screen ? bgRoot.screen.name : "", wallpaperImage);
     }
 
     LockRippleEffect {
@@ -778,6 +797,11 @@ PanelWindow {
         }
 
         DesktopShortcutDropArea {
+            anchors.fill: parent
+            screenName: bgRoot.editScreenName
+        }
+
+        DesktopIconPlates {
             anchors.fill: parent
             screenName: bgRoot.editScreenName
         }

@@ -53,29 +53,7 @@ AbstractBackgroundWidget {
         return HyprlandData.windowList.some(w => w.workspace && w.workspace.id === activeWsId);
     }
 
-    readonly property string artCachePath: `${Directories.coverArt}/${Qt.md5(root.artUrl)}`
-    property string downloadedArtUrl: ""
-    readonly property string artSource: root.artUrl.startsWith("file://") ? root.artUrl
-        : (root.artUrl !== "" && root.downloadedArtUrl === root.artUrl ? Qt.resolvedUrl(root.artCachePath) : "")
-    function refreshArtCache(): void {
-        if (!root.artUrl || root.artUrl.startsWith("file://") || artDownloader.running)
-            return;
-        artDownloader.requestUrl = root.artUrl;
-        artDownloader.requestPath = root.artCachePath;
-        artDownloader.running = true;
-    }
-    onArtUrlChanged: Qt.callLater(root.refreshArtCache)
-    Process {
-        id: artDownloader
-        property string requestUrl: ""
-        property string requestPath: ""
-        command: ["bash", "-c", "test -f \"$2\" || (curl -fLsS -- \"$1\" -o \"$2.tmp\" && mv -- \"$2.tmp\" \"$2\")", "art-cache", requestUrl, requestPath]
-        onExited: exitCode => {
-            if (exitCode === 0) root.downloadedArtUrl = requestUrl;
-            if (requestUrl !== root.artUrl) Qt.callLater(root.refreshArtCache);
-        }
-        Component.onCompleted: Qt.callLater(root.refreshArtCache)
-    }
+    readonly property string artSource: CoverArt.source(root.artUrl)
 
     property string activeLyricText: ""
     property real lyricOpacity: 1.0
@@ -168,7 +146,7 @@ AbstractBackgroundWidget {
     }
 
     Timer {
-        running: root.playing && root.visible
+        running: root.playing && root.live
         interval: 1000
         repeat: true
         onTriggered: if (root.player) root.player.positionChanged()
@@ -211,45 +189,52 @@ AbstractBackgroundWidget {
             radius: Appearance.rounding.windowRounding + 16
             clip: true
 
-            layer.enabled: true
-            layer.effect: OpacityMask {
-                maskSource: Rectangle {
-                    width: mainBg.width
-                    height: mainBg.height
-                    radius: mainBg.radius
+            // Only the artwork and its shading are rounded-clipped. A layer on mainBg
+            // would also rasterize the texts below, which come out soft.
+            Item {
+                id: artClip
+                anchors.fill: parent
+                layer.enabled: true
+                layer.effect: OpacityMask {
+                    maskSource: Rectangle {
+                        width: mainBg.width
+                        height: mainBg.height
+                        radius: mainBg.radius
+                    }
+                }
+
+                AndroidMediaArtwork {
+                    id: artwork
+                    anchors.fill: parent
+                    visible: root.hasTrack
+                    artSource: root.artUrl
+                    trackKey: JSON.stringify([root.player?.uniqueId ?? "", root.player?.trackTitle ?? "",
+                        root.player?.trackArtist ?? "", root.player?.trackAlbum ?? ""])
+                    hasPlayer: !!root.player
+                    playing: root.playing
+                    wide: 1
+                }
+
+                Item {
+                    anchors.fill: parent
+                    visible: root.hasTrack
+                    opacity: 0.3
+
+                    RadialGradient {
+                        anchors.fill: parent
+                        gradient: Gradient {
+                            GradientStop { position: 0.0; color: Qt.rgba(0, 0, 0, 0) }
+                            GradientStop { position: 1.0; color: Qt.rgba(0, 0, 0, 0.9) }
+                        }
+                        horizontalRadius: width * 0.7
+                        verticalRadius: height * 0.7
+                    }
                 }
             }
 
-            AndroidMediaArtwork {
-                id: artwork
-                anchors.fill: parent
-                visible: root.hasTrack
-                artSource: root.artUrl
-                trackKey: JSON.stringify([root.player?.uniqueId ?? "", root.player?.trackTitle ?? "",
-                    root.player?.trackArtist ?? "", root.player?.trackAlbum ?? ""])
-                hasPlayer: !!root.player
-                playing: root.playing
-                wide: 1
-            }
             Connections {
                 target: root.player
                 function onPostTrackChanged(): void { artwork.requestArt(true); }
-            }
-
-            Item {
-                anchors.fill: parent
-                visible: root.hasTrack
-                opacity: 0.3
-
-                RadialGradient {
-                    anchors.fill: parent
-                    gradient: Gradient {
-                        GradientStop { position: 0.0; color: Qt.rgba(0, 0, 0, 0) }
-                        GradientStop { position: 1.0; color: Qt.rgba(0, 0, 0, 0.9) }
-                    }
-                    horizontalRadius: width * 0.7
-                    verticalRadius: height * 0.7
-                }
             }
 
             ColumnLayout {

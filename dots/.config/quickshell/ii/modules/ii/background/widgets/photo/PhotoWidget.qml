@@ -32,7 +32,7 @@ AbstractBackgroundWidget {
     }
 
     readonly property string cleanSource: {
-        let path = Config.options.background.widgets.photo.imagePath;
+        let path = root.instanceImagePath !== undefined ? root.instanceImagePath : Config.options.background.widgets.photo.imagePath;
         if (!path || path === "") return "";
         const qIdx = path.indexOf("?");
         if (qIdx !== -1) path = path.substring(0, qIdx);
@@ -147,5 +147,13 @@ AbstractBackgroundWidget {
                 }
             }
         }
+    }
+
+    // Drop an image from the file manager to replace this widget's picture.
+    PhotoDropArea {
+        anchors.fill: outerCircle
+        entryName: root.configEntryName
+        instanceId: root.widgetInstance?.id ?? ""
+        shapeMode: "circle"
     }
 }

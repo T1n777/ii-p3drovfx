@@ -152,7 +152,12 @@ LazyLoader {
         // with an inner MouseArea and only drives `down`, so Control's `pressed` signal
         // never fires there — the two together cover every target the bar actually uses,
         // and ignoreUnknownSignals makes the one a given target lacks a no-op.
-        function onPressed() { root.toggleFromPress(); }
+        function onPressed(mouse) {
+            // A widget that cycles on the right button keeps that press away from the popup.
+            if (mouse?.button === Qt.RightButton && root.hoverTarget?.rightClickCycles)
+                return;
+            root.toggleFromPress();
+        }
         function onDownChanged() {
             if (root.hoverTarget?.down)
                 root.toggleFromPress();
@@ -552,6 +557,12 @@ LazyLoader {
 
             Rectangle {
                 id: popupBackground
+
+                ShellRegionTarget {
+                    target: popupBackground
+                    label: Translation.tr("Popup")
+                    namespace: "quickshell:popup"
+                }
                 readonly property real margin: 10
 
                 readonly property real targetWidth: ((root.contentItem?.implicitWidth ?? 0) + margin * 2) * root.layoutScale

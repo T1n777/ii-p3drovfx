@@ -26,6 +26,10 @@ MouseArea {
     height: implicitHeight
     visible: hasDevices
     hoverEnabled: !BarInteraction.clickToShow
+
+    // Click-to-show gives the left click to the popup; cycling moves to the right button.
+    readonly property bool rightClickCycles: BarInteraction.cycleOnRightClick
+    acceptedButtons: rightClickCycles ? (Qt.LeftButton | Qt.RightButton) : Qt.LeftButton
     cursorShape: Qt.PointingHandCursor
 
     onHasDevicesChanged: {
@@ -46,7 +50,9 @@ MouseArea {
             rootItem.toggleVisible(hasDevices);
     }
 
-    onClicked: {
+    onClicked: mouse => {
+        if (mouse.button !== (rightClickCycles ? Qt.RightButton : Qt.LeftButton))
+            return;
         if (activeDevices.length > 1) {
             deviceIndex = (deviceIndex + 1) % activeDevices.length
         }
@@ -60,19 +66,19 @@ MouseArea {
 
         MaterialShape {
             shapeString: "Cookie7Sided"
-            color: palette.colBackground
+            color: palette.colBackgroundVariant
             implicitSize: Appearance.sizes.baseBarHeight - 8
             MaterialSymbol {
                 anchors.centerIn: parent
                 iconSize: Appearance.font.pixelSize.normal
                 text: root.hasDevices ? Icons.getBluetoothDeviceMaterialSymbol(root.primaryDevice.icon) : "bluetooth"
-                color: palette.colOnBackground
+                color: palette.colOnBackgroundVariant
             }
         }
 
         Rectangle {
-            color: palette.colContainer
-            radius: Config.options.bar.barGroupStyle === 1 ? Appearance.rounding.windowRounding : Appearance.rounding.full
+            color: palette.colBackground
+            radius: (typeof rootItem !== "undefined" ? rootItem.groupStyle : Config.options.bar.barGroupStyle) === 1 ? Appearance.rounding.windowRounding : Appearance.rounding.full
             implicitWidth: content.implicitWidth + 24
             implicitHeight: Appearance.sizes.baseBarHeight - 8
             
@@ -85,7 +91,7 @@ MouseArea {
                     text: root.primaryDevice ? root.primaryDevice.name : ""
                     font.pixelSize: 10
                     font.weight: Font.Black
-                    color: palette.colOnContainer
+                    color: palette.colOnBackground
                     Layout.maximumWidth: 60
                     elide: Text.ElideRight
                 }
@@ -103,11 +109,11 @@ MouseArea {
                     to: 1
                     value: root.primaryDevice?.battery ?? 0
                     highlightColor: {
-                        if (!root.primaryDevice) return palette.colBackground;
+                        if (!root.primaryDevice) return palette.colOnBackground;
                         if (root.primaryDevice.battery <= 0.15) return Appearance.colors.colError;
-                        return palette.colBackground;
+                        return palette.colOnBackground;
                     }
-                    trackColor: ColorUtils.transparentize(palette.colOnContainer, 0.7)
+                    trackColor: ColorUtils.transparentize(palette.colOnBackground, 0.7)
                 }
             }
         }
@@ -122,19 +128,19 @@ MouseArea {
         MaterialShape {
             Layout.alignment: Qt.AlignHCenter
             shapeString: "Cookie7Sided"
-            color: palette.colBackground
+            color: palette.colBackgroundVariant
             implicitSize: Appearance.sizes.verticalBarWidth - 8
             MaterialSymbol {
                 anchors.centerIn: parent
                 iconSize: Appearance.font.pixelSize.normal
                 text: root.hasDevices ? Icons.getBluetoothDeviceMaterialSymbol(root.primaryDevice.icon) : "bluetooth"
-                color: palette.colOnBackground
+                color: palette.colOnBackgroundVariant
             }
         }
 
         Rectangle {
             Layout.alignment: Qt.AlignHCenter
-            color: palette.colContainer
+            color: palette.colBackground
             radius: Appearance.rounding.small
             implicitWidth: Appearance.sizes.verticalBarWidth - 8
             implicitHeight: contentVert.implicitHeight + 14
@@ -149,7 +155,7 @@ MouseArea {
                     text: root.primaryDevice ? root.primaryDevice.name.slice(0, 2).toUpperCase() : ""
                     font.pixelSize: 9
                     font.weight: Font.Black
-                    color: palette.colOnContainer
+                    color: palette.colOnBackground
                 }
 
                 Rectangle {
@@ -158,7 +164,7 @@ MouseArea {
                     Layout.preferredWidth: 8
                     Layout.preferredHeight: 32
                     radius: Appearance.rounding.full
-                    color: palette.colBackgroundVariant
+                    color: ColorUtils.transparentize(palette.colOnBackground, 0.7)
                     
                     Rectangle {
                         anchors.bottom: parent.bottom
@@ -166,9 +172,9 @@ MouseArea {
                         height: parent.height * (root.primaryDevice ? root.primaryDevice.battery : 0)
                         radius: Appearance.rounding.full
                         color: {
-                            if (!root.primaryDevice) return palette.colBackground;
+                            if (!root.primaryDevice) return palette.colOnBackground;
                             if (root.primaryDevice.battery <= 0.15) return Appearance.colors.colError;
-                            return palette.colBackground;
+                            return palette.colOnBackground;
                         }
                     }
                 }

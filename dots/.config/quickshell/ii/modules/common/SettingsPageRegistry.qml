@@ -16,6 +16,8 @@ import Quickshell
  *  - component:  page file, relative to the ii config root
  *  - subPages:   widget config files opened from this page, relative to
  *                modules/settings/configs/ (used for search indexing)
+ *  - searchSubPages: { searchSource: subPage } for a search source that indexes
+ *                a sub-page's options, so its results open that sub-page
  *  - aliases:    extra untranslated search terms (old page names etc.)
  *  - hidden:     not shown in the sidebar, excluded from keyboard cycling.
  *                Hidden pages must stay at the END of the list.
@@ -44,7 +46,7 @@ Singleton {
             "icon": "palette",
             "component": "modules/settings/configs/ColorsThemesConfig.qml",
             "subPages": ["widgets/OpenRGBConfig.qml", "widgets/WallpaperEngineConfig.qml"],
-            "searchSources": ["sections/ColorsPreviewSection.qml", "sections/ColorsSchedulingSection.qml", "sections/ColorsWallpaperThemingSection.qml", "sections/ColorsWallpaperVariantsSection.qml"],
+            "searchSources": ["sections/ColorsPreviewSection.qml", "sections/ColorsSchedulingSection.qml", "sections/ColorsWallpaperThemingSection.qml", "sections/ColorsWallpaperVariantsSection.qml", "sections/ColorsPickerSection.qml"],
             "aliases": []
         },
         {
@@ -52,7 +54,9 @@ Singleton {
             "name": "Bar",
             "icon": "space_bar",
             "component": "modules/settings/configs/BarConfig.qml",
-            "subPages": ["widgets/BarAppearanceConfig.qml", "widgets/BarLayoutConfig.qml", "widgets/BarWidgetsWaffleConfig.qml", "widgets/ActiveWindowConfig.qml", "widgets/SearchBarWidgetConfig.qml", "widgets/DateBarWidgetConfig.qml", "widgets/ClockBarWidgetConfig.qml", "widgets/WeatherBarWidgetConfig.qml", "widgets/MediaPlayerConfig.qml", "widgets/UtilButtonsConfig.qml", "widgets/KeyboardLayoutConfig.qml", "widgets/SystemMonitorConfig.qml", "widgets/AiPlanUsageConfig.qml", "widgets/PortWatcherConfig.qml", "widgets/PrivacyPillConfig.qml", "widgets/IndicatorsConfig.qml", "widgets/RecordIndicatorConfig.qml", "widgets/SportsConfig.qml", "widgets/BluetoothConfig.qml", "widgets/SystemTrayConfig.qml", "widgets/BatteryConfig.qml", "widgets/DashboardButtonConfig.qml", "widgets/ClockDateWidgetConfig.qml", "widgets/WaffleTweaksConfig.qml", "widgets/DockToPanelConfig.qml", "widgets/BarScrollActionsConfig.qml", "widgets/BarTooltipsConfig.qml", "widgets/BarPopupsConfig.qml"],
+            "searchComponent": false,
+            "searchSources": ["sections/BarPlacementSection.qml", "sections/BarAppearanceSection.qml"],
+            "subPages": ["widgets/BarAppearanceConfig.qml", "widgets/BarLayoutConfig.qml", "widgets/BarWidgetsWaffleConfig.qml", "widgets/ActiveWindowConfig.qml", "widgets/SearchBarWidgetConfig.qml", "widgets/DateBarWidgetConfig.qml", "widgets/ClockBarWidgetConfig.qml", "widgets/WeatherBarWidgetConfig.qml", "widgets/MediaPlayerConfig.qml", "widgets/UtilButtonsConfig.qml", "widgets/KeyboardLayoutConfig.qml", "widgets/SystemMonitorConfig.qml", "widgets/AiPlanUsageConfig.qml", "widgets/PortWatcherConfig.qml", "widgets/NetworkSpeedConfig.qml", "widgets/PrivacyPillConfig.qml", "widgets/IndicatorsConfig.qml", "widgets/RecordIndicatorConfig.qml", "widgets/SportsConfig.qml", "widgets/BluetoothConfig.qml", "widgets/SystemTrayConfig.qml", "widgets/BatteryConfig.qml", "widgets/DashboardButtonConfig.qml", "widgets/ClockDateWidgetConfig.qml", "widgets/WaffleTweaksConfig.qml", "widgets/DockToPanelConfig.qml", "widgets/BarScrollActionsConfig.qml", "widgets/BarTooltipsConfig.qml", "widgets/BarPopupsConfig.qml"],
             "aliases": ["Bar & Status Bar", "Status Bar", "Shell mode", "Waffle", "Bar appearance", "Bar layout", "Bar style", "Brand icon", "Bar popups", "Floating popups", "Click bar to open sidebars"]
         },
         {
@@ -60,8 +64,12 @@ Singleton {
             "name": "Background",
             "icon": "wallpaper",
             "component": "modules/settings/configs/BackgroundConfig.qml",
-            "subPages": ["widgets/ParallaxConfig.qml", "widgets/MediaModeBackgroundConfig.qml"],
-            "aliases": ["Wallpaper", "Backgrounds", "Wallpaper Engine"]
+            "subPages": ["widgets/ParallaxConfig.qml", "widgets/MediaModeBackgroundConfig.qml", "widgets/DepthEffectConfig.qml", "widgets/VideoWallpaperConfig.qml"],
+            "searchComponent": false,
+            "searchSources": ["sections/BackgroundOptionsSection.qml", "sections/ContextMenusOptionsSection.qml"],
+            // The context menus page is a sub-page here; its options open it.
+            "searchSubPages": { "sections/ContextMenusOptionsSection.qml": "widgets/ContextMenusConfig.qml" },
+            "aliases": ["Wallpaper", "Backgrounds", "Wallpaper Engine", "Context menus", "Right-click menu", "Compact menu", "Custom commands"]
         },
         {
             "id": "interfaceFonts",
@@ -69,6 +77,8 @@ Singleton {
             "icon": "font_download",
             "component": "modules/settings/configs/InterfaceFontsConfig.qml",
             "subPages": ["widgets/CustomFontsConfig.qml"],
+            "searchComponent": false,
+            "searchSources": ["sections/InterfaceFontsOptionsSection.qml"],
             "aliases": ["Base Icon Themes", "Decorative Options", "Shell family", "Panel family", "Tablet mode", "Waffle", "illogical-impulse", "Switch shell"]
         },
         {
@@ -101,6 +111,8 @@ Singleton {
             "icon": "side_navigation",
             "component": "modules/settings/configs/SidebarsConfig.qml",
             "subPages": ["widgets/SidebarQuickTogglesConfig.qml", "widgets/ScreenCornersConfig.qml"],
+            "searchComponent": false,
+            "searchSources": ["sections/SidebarsOptionsSection.qml"],
             "aliases": ["Sidebars & Panels", "Panels"]
         },
         {
@@ -126,7 +138,9 @@ Singleton {
             "icon": "workspaces",
             "component": "modules/settings/configs/WorkspacesConfig.qml",
             "subPages": ["widgets/DockWorkspaceConfig.qml"],
-            "aliases": ["Tint workspaces icons"]
+            "searchComponent": false,
+            "searchSources": ["sections/WorkspacesOptionsSection.qml"],
+            "aliases": ["Tint workspaces icons", "Active indicator", "Numerals", "Workspace arranger", "Workspace compactor", "Insert workspace", "Close workspace gaps"]
         },
         {
             "id": "overview",
@@ -235,6 +249,8 @@ Singleton {
             "icon": "help",
             "component": "modules/settings/configs/CheatSheetConfig.qml",
             "subPages": [],
+            "searchComponent": false,
+            "searchSources": ["sections/CheatSheetOptionsSection.qml"],
             "aliases": ["Shortcuts", "Keybinds", "Timetable", "Gmail", "Amino acids", "Commands reference", "Periodic table"]
         },
         {

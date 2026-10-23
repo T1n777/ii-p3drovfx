@@ -20,6 +20,8 @@ Singleton {
     readonly property string pictures: StandardPaths.standardLocations(StandardPaths.PicturesLocation)[0] || ""
     readonly property string music: StandardPaths.standardLocations(StandardPaths.MusicLocation)[0] || ""
     readonly property string videos: StandardPaths.standardLocations(StandardPaths.MoviesLocation)[0] || ""
+    readonly property string desktop: StandardPaths.standardLocations(StandardPaths.DesktopLocation)[0] || (Directories.home + "/Desktop")
+    property string desktopPath: FileUtils.trimFileProtocol(Directories.desktop)
     readonly property string runtime: FileUtils.trimFileProtocol(StandardPaths.standardLocations(StandardPaths.RuntimeLocation)[0] || "/run/user/1000")
 
     readonly property string losslessCutDesktopPath: FileUtils.trimFileProtocol(`${Directories.home}/.local/share/applications/losslesscut.desktop`)
@@ -55,6 +57,9 @@ Singleton {
     property string booruDownloads: FileUtils.trimFileProtocol(Directories.pictures + "/homework")
     property string booruDownloadsNsfw: FileUtils.trimFileProtocol(Directories.pictures + "/homework/🌶️")
     property string latexOutput: FileUtils.trimFileProtocol(`${Directories.cache}/media/latex`)
+    // Named copies of screenshots sent to a phone. kdeconnectd reads the file
+    // while the transfer runs, so the copy has to outlive the overlay.
+    property string phoneShare: FileUtils.trimFileProtocol(`${Directories.cache}/phone-share`)
     property string shellConfig: FileUtils.trimFileProtocol(`${Directories.config}/illogical-impulse`)
     property string shellConfigName: "config.json"
     property string shellConfigPath: `${Directories.shellConfig}/${Directories.shellConfigName}`
@@ -116,6 +121,8 @@ Singleton {
     property string conflictCachePath: FileUtils.trimFileProtocol(`${Directories.cache}/conflict-killer`)
     property string notificationsPath: FileUtils.trimFileProtocol(`${Directories.cache}/notifications/notifications.json`)
     property string lyricsPath: FileUtils.trimFileProtocol(`${Directories.cache}/lyrics/lyrics.json`)
+    property string lyricsCacheDir: FileUtils.trimFileProtocol(`${Directories.cache}/lyrics`)
+    property string betterlyricsCachePath: FileUtils.trimFileProtocol(`${Directories.cache}/lyrics/betterlyrics.json`)
     // Hand-written .lrc keyed by track. Lives in state, not cache: it can't be
     // re-fetched from anywhere if it gets cleared.
     property string customLyricsPath: FileUtils.trimFileProtocol(`${Directories.state}/user/custom-lyrics.json`)
@@ -200,6 +207,7 @@ Singleton {
 
     // Cleanup on init
     Component.onCompleted: {
+        Quickshell.execDetached(["mkdir", "-p", `${desktopPath}`]);
         Quickshell.execDetached(["mkdir", "-p", `${shellConfig}`]);
         Quickshell.execDetached(["mkdir", "-p", `${favicons}`]);
         Quickshell.execDetached(["bash", "-c", `rm -rf '${coverArt}'; mkdir -p '${coverArt}'`]);

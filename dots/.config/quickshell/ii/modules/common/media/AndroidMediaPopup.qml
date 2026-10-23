@@ -32,29 +32,7 @@ Item {
     readonly property string trackArtist: player?.trackArtist || Translation.tr("Unknown Artist")
     readonly property string identity: player ? (player.identity ?? "") : ""
 
-    readonly property string artCachePath: `${Directories.coverArt}/${Qt.md5(root.artUrl)}`
-    property string downloadedArtUrl: ""
-    readonly property string artSource: root.artUrl.startsWith("file://") ? root.artUrl
-        : (root.artUrl !== "" && root.downloadedArtUrl === root.artUrl ? Qt.resolvedUrl(root.artCachePath) : "")
-    function refreshArtCache(): void {
-        if (!root.artUrl || root.artUrl.startsWith("file://") || artDownloader.running)
-            return;
-        artDownloader.requestUrl = root.artUrl;
-        artDownloader.requestPath = root.artCachePath;
-        artDownloader.running = true;
-    }
-    onArtUrlChanged: Qt.callLater(root.refreshArtCache)
-    Process {
-        id: artDownloader
-        property string requestUrl: ""
-        property string requestPath: ""
-        command: ["bash", "-c", "test -f \"$2\" || (curl -fLsS -- \"$1\" -o \"$2.tmp\" && mv -- \"$2.tmp\" \"$2\")", "art-cache", requestUrl, requestPath]
-        onExited: exitCode => {
-            if (exitCode === 0) root.downloadedArtUrl = requestUrl;
-            if (requestUrl !== root.artUrl) Qt.callLater(root.refreshArtCache);
-        }
-        Component.onCompleted: Qt.callLater(root.refreshArtCache)
-    }
+    readonly property string artSource: CoverArt.source(root.artUrl)
 
     property string activeLyricText: ""
     property real lyricOpacity: 1.0
@@ -177,24 +155,30 @@ Item {
         radius: Appearance.rounding.windowRounding
         clip: true
 
-        layer.enabled: true
-        layer.effect: OpacityMask {
-            maskSource: Rectangle {
-                width: mainBg.width
-                height: mainBg.height
-                radius: mainBg.radius
-            }
-        }
-
-        AndroidMediaArtwork {
-            id: artwork
+        // Only the artwork is rounded-clipped. A layer on mainBg would also
+        // rasterize the texts below, which come out soft at fractional offsets.
+        Item {
+            id: artClip
             anchors.fill: parent
-            artSource: root.artUrl
-            trackKey: JSON.stringify([root.player?.uniqueId ?? "", root.player?.trackTitle ?? "",
-                root.player?.trackArtist ?? "", root.player?.trackAlbum ?? ""])
-            hasPlayer: !!root.player
-            playing: root.playing
-            wide: 1
+            layer.enabled: true
+            layer.effect: OpacityMask {
+                maskSource: Rectangle {
+                    width: mainBg.width
+                    height: mainBg.height
+                    radius: mainBg.radius
+                }
+            }
+
+            AndroidMediaArtwork {
+                id: artwork
+                anchors.fill: parent
+                artSource: root.artUrl
+                trackKey: JSON.stringify([root.player?.uniqueId ?? "", root.player?.trackTitle ?? "",
+                    root.player?.trackArtist ?? "", root.player?.trackAlbum ?? ""])
+                hasPlayer: !!root.player
+                playing: root.playing
+                wide: 1
+            }
         }
         Connections {
             target: root.player

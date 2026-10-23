@@ -65,6 +65,22 @@ Item {
     property real sidebarTopOffset: 0
     property real sidebarBottomOffset: 0
 
+    // A pinned dock's exclusive zone on the top or bottom edge (connect mode). The ring's
+    // band on that edge widens to it, under the dock, so the hole - and its rounded
+    // corners - ends where the windows do instead of running on beneath the dock.
+    property real dockTopInset: 0
+    property real dockBottomInset: 0
+    readonly property real dockTopBand: dockTopInset * retract
+    readonly property real dockBottomBand: dockBottomInset * retract
+    // The same on the left and right edges, for a vertical dock. These strips already
+    // ride on the sidebars, so the band moves with a sidebar pushing the dock.
+    property real dockLeftInset: 0
+    property real dockRightInset: 0
+    readonly property real dockLeftBand: dockLeftInset * retract
+    readonly property real dockRightBand: dockRightInset * retract
+    readonly property real topEdge: (hasTopFrame ? frameThickness : Math.max(frameThickness, totalTopPush)) + dockTopBand
+    readonly property real bottomEdge: (hasBottomFrame ? frameThickness : Math.max(frameThickness, totalBottomPush)) + dockBottomBand
+
     readonly property real leftSidebarOffset: (GlobalStates.animatedLeftSidebarWidth > 0 && visualsRoot.screen && visualsRoot.screen.name === GlobalStates.activeLeftSidebarMonitor) ? GlobalStates.animatedLeftSidebarWidth : 0
     readonly property real rightSidebarOffset: (GlobalStates.animatedRightSidebarWidth > 0 && visualsRoot.screen && visualsRoot.screen.name === GlobalStates.activeRightSidebarMonitor) ? GlobalStates.animatedRightSidebarWidth : 0
 
@@ -87,7 +103,7 @@ Item {
         id: barThemes
     }
     property var activeTheme: barThemes.getTheme(Config.options.bar.expressiveColorTheme)
-    property color baseColor: showBarBackground ? (Config.options.bar.expressiveColors ? activeTheme.barBackground : Appearance.colors.colLayer0) : "transparent"
+    property color baseColor: showBarBackground ? (Config.options.bar.amoledBackground ? "#000000" : Config.options.bar.expressiveColors ? activeTheme.barBackground : Appearance.colors.colLayer0) : "transparent"
 
     Behavior on baseColor {
         animation: Appearance.animation.elementMoveFast.colorAnimation.createObject(visualsRoot)
@@ -106,6 +122,15 @@ Item {
     // Island backgrounds (barBackgroundStyle 3) are separate pills with gaps
     // between them, so a solid plate would fill those gaps with the bar color.
     readonly property bool barWeldedToFrame: !isFloatingOrIsland && Config.options.bar.barBackgroundStyle !== 3
+    readonly property bool leftPlateShown: barWeldedToFrame && !hasLeftFrame
+    readonly property bool rightPlateShown: barWeldedToFrame && !hasRightFrame
+    // A side strip riding on an open sidebar runs on to the screen edge (to meet the
+    // sidebar); the top or bottom strip then starts past it instead of under it, or the
+    // overlap paints the translucent colour twice - a dark block once a dock band widens it.
+    readonly property real leftStripAtTop: (leftSidebarOffset > 0 && !barBottom && (hasLeftFrame || dockLeftBand > 0)) ? leftFrame.width : 0
+    readonly property real rightStripAtTop: (rightSidebarOffset > 0 && !barBottom && (hasRightFrame || dockRightBand > 0)) ? rightFrame.width : 0
+    readonly property real leftStripAtBottom: (leftSidebarOffset > 0 && barBottom && (hasLeftFrame || dockLeftBand > 0)) ? leftFrame.width : 0
+    readonly property real rightStripAtBottom: (rightSidebarOffset > 0 && barBottom && (hasRightFrame || dockRightBand > 0)) ? rightFrame.width : 0
 
     // Inner corner radius of wrapped frame always respects windowRounding
     readonly property real frameInnerCornerRadius: Appearance.rounding.windowRounding
@@ -176,11 +201,14 @@ Item {
             top: parent.top
             left: parent.left
             right: parent.right
-            topMargin: (!hasTopFrame) ? -Math.max(0, frameThickness - visualsRoot.hBarHiddenAmount) : 0
-            leftMargin: visualsRoot.totalLeftPush
-            rightMargin: visualsRoot.totalRightPush
+            // With a dock band it sits past a top bar and spans the whole edge, except where
+            // a bar plate already runs to the screen edge: with transparency every overlap
+            // paints the translucent colour twice and reads as a second shade.
+            topMargin: (!hasTopFrame) ? (visualsRoot.dockTopBand > 0 ? visualsRoot.totalTopPush : -Math.max(0, frameThickness - visualsRoot.hBarHiddenAmount)) : 0
+            leftMargin: ((visualsRoot.dockTopBand > 0 && !visualsRoot.leftPlateShown) ? 0 : visualsRoot.totalLeftPush) + visualsRoot.leftStripAtTop
+            rightMargin: ((visualsRoot.dockTopBand > 0 && !visualsRoot.rightPlateShown) ? 0 : visualsRoot.totalRightPush) + visualsRoot.rightStripAtTop
         }
-        height: frameThickness
+        height: hasTopFrame ? frameThickness + visualsRoot.dockTopBand : (visualsRoot.dockTopBand > 0 ? visualsRoot.dockTopBand : frameThickness)
         color: visualsRoot.baseColor
     }
 
@@ -191,11 +219,11 @@ Item {
             bottom: parent.bottom
             left: parent.left
             right: parent.right
-            bottomMargin: (!hasBottomFrame) ? -Math.max(0, frameThickness - visualsRoot.hBarHiddenAmount) : 0
-            leftMargin: visualsRoot.totalLeftPush
-            rightMargin: visualsRoot.totalRightPush
+            bottomMargin: (!hasBottomFrame) ? (visualsRoot.dockBottomBand > 0 ? visualsRoot.totalBottomPush : -Math.max(0, frameThickness - visualsRoot.hBarHiddenAmount)) : 0
+            leftMargin: ((visualsRoot.dockBottomBand > 0 && !visualsRoot.leftPlateShown) ? 0 : visualsRoot.totalLeftPush) + visualsRoot.leftStripAtBottom
+            rightMargin: ((visualsRoot.dockBottomBand > 0 && !visualsRoot.rightPlateShown) ? 0 : visualsRoot.totalRightPush) + visualsRoot.rightStripAtBottom
         }
-        height: frameThickness
+        height: hasBottomFrame ? frameThickness + visualsRoot.dockBottomBand : (visualsRoot.dockBottomBand > 0 ? visualsRoot.dockBottomBand : frameThickness)
         color: visualsRoot.baseColor
     }
 
@@ -207,11 +235,11 @@ Item {
             top: parent.top
             bottom: parent.bottom
             left: parent.left
-            leftMargin: (!hasLeftFrame) ? -Math.max(0, frameThickness - visualsRoot.vBarHiddenAmount) : visualsRoot.leftSidebarOffset
-            topMargin: (visualsRoot.leftSidebarOffset > 0 && !visualsRoot.barBottom) ? visualsRoot.sidebarTopOffset : (hasTopFrame ? frameThickness : Math.max(frameThickness, visualsRoot.totalTopPush))
-            bottomMargin: (visualsRoot.leftSidebarOffset > 0 && visualsRoot.barBottom) ? visualsRoot.sidebarBottomOffset : (hasBottomFrame ? frameThickness : Math.max(frameThickness, visualsRoot.totalBottomPush))
+            leftMargin: (!hasLeftFrame) ? (visualsRoot.dockLeftBand > 0 ? visualsRoot.totalLeftPush : -Math.max(0, frameThickness - visualsRoot.vBarHiddenAmount)) : visualsRoot.leftSidebarOffset
+            topMargin: (visualsRoot.leftSidebarOffset > 0 && !visualsRoot.barBottom) ? visualsRoot.sidebarTopOffset : visualsRoot.topEdge
+            bottomMargin: (visualsRoot.leftSidebarOffset > 0 && visualsRoot.barBottom) ? visualsRoot.sidebarBottomOffset : visualsRoot.bottomEdge
         }
-        width: frameThickness
+        width: hasLeftFrame ? frameThickness + visualsRoot.dockLeftBand : (visualsRoot.dockLeftBand > 0 ? visualsRoot.dockLeftBand : frameThickness)
         color: visualsRoot.baseColor
     }
 
@@ -222,11 +250,11 @@ Item {
             top: parent.top
             bottom: parent.bottom
             right: parent.right
-            rightMargin: (!hasRightFrame) ? -Math.max(0, frameThickness - visualsRoot.vBarHiddenAmount) : visualsRoot.rightSidebarOffset
-            topMargin: (visualsRoot.rightSidebarOffset > 0 && !visualsRoot.barBottom) ? visualsRoot.sidebarTopOffset : (hasTopFrame ? frameThickness : Math.max(frameThickness, visualsRoot.totalTopPush))
-            bottomMargin: (visualsRoot.rightSidebarOffset > 0 && visualsRoot.barBottom) ? visualsRoot.sidebarBottomOffset : (hasBottomFrame ? frameThickness : Math.max(frameThickness, visualsRoot.totalBottomPush))
+            rightMargin: (!hasRightFrame) ? (visualsRoot.dockRightBand > 0 ? visualsRoot.totalRightPush : -Math.max(0, frameThickness - visualsRoot.vBarHiddenAmount)) : visualsRoot.rightSidebarOffset
+            topMargin: (visualsRoot.rightSidebarOffset > 0 && !visualsRoot.barBottom) ? visualsRoot.sidebarTopOffset : visualsRoot.topEdge
+            bottomMargin: (visualsRoot.rightSidebarOffset > 0 && visualsRoot.barBottom) ? visualsRoot.sidebarBottomOffset : visualsRoot.bottomEdge
         }
-        width: frameThickness
+        width: hasRightFrame ? frameThickness + visualsRoot.dockRightBand : (visualsRoot.dockRightBand > 0 ? visualsRoot.dockRightBand : frameThickness)
         color: visualsRoot.baseColor
     }
 
@@ -237,8 +265,8 @@ Item {
         anchors {
             bottom: parent.bottom
             left: parent.left
-            bottomMargin: hasBottomFrame ? frameThickness : Math.max(frameThickness, visualsRoot.totalBottomPush)
-            leftMargin: hasLeftFrame ? frameThickness + visualsRoot.leftSidebarOffset : Math.max(frameThickness, visualsRoot.totalLeftPush)
+            bottomMargin: visualsRoot.bottomEdge
+            leftMargin: (hasLeftFrame ? frameThickness + visualsRoot.leftSidebarOffset : Math.max(frameThickness, visualsRoot.totalLeftPush)) + visualsRoot.dockLeftBand
         }
         implicitSize: frameInnerCornerRadius * visualsRoot.retract
         color: visualsRoot.baseColor
@@ -251,8 +279,8 @@ Item {
         anchors {
             top: parent.top
             left: parent.left
-            topMargin: hasTopFrame ? frameThickness : Math.max(frameThickness, visualsRoot.totalTopPush)
-            leftMargin: hasLeftFrame ? frameThickness + visualsRoot.leftSidebarOffset : Math.max(frameThickness, visualsRoot.totalLeftPush)
+            topMargin: visualsRoot.topEdge
+            leftMargin: (hasLeftFrame ? frameThickness + visualsRoot.leftSidebarOffset : Math.max(frameThickness, visualsRoot.totalLeftPush)) + visualsRoot.dockLeftBand
         }
         implicitSize: frameInnerCornerRadius * visualsRoot.retract
         color: visualsRoot.baseColor
@@ -265,8 +293,8 @@ Item {
         anchors {
             top: parent.top
             right: parent.right
-            topMargin: hasTopFrame ? frameThickness : Math.max(frameThickness, visualsRoot.totalTopPush)
-            rightMargin: hasRightFrame ? frameThickness + visualsRoot.rightSidebarOffset : Math.max(frameThickness, visualsRoot.totalRightPush)
+            topMargin: visualsRoot.topEdge
+            rightMargin: (hasRightFrame ? frameThickness + visualsRoot.rightSidebarOffset : Math.max(frameThickness, visualsRoot.totalRightPush)) + visualsRoot.dockRightBand
         }
         implicitSize: frameInnerCornerRadius * visualsRoot.retract
         color: visualsRoot.baseColor
@@ -279,8 +307,8 @@ Item {
         anchors {
             bottom: parent.bottom
             right: parent.right
-            bottomMargin: hasBottomFrame ? frameThickness : Math.max(frameThickness, visualsRoot.totalBottomPush)
-            rightMargin: hasRightFrame ? frameThickness + visualsRoot.rightSidebarOffset : Math.max(frameThickness, visualsRoot.totalRightPush)
+            bottomMargin: visualsRoot.bottomEdge
+            rightMargin: (hasRightFrame ? frameThickness + visualsRoot.rightSidebarOffset : Math.max(frameThickness, visualsRoot.totalRightPush)) + visualsRoot.dockRightBand
         }
         implicitSize: frameInnerCornerRadius * visualsRoot.retract
         color: visualsRoot.baseColor
@@ -321,8 +349,8 @@ Item {
             bottom: parent.bottom
             left: parent.left
             leftMargin: (!hasLeftFrame) ? -Math.max(0, frameThickness - visualsRoot.vBarHiddenAmount) : visualsRoot.staticLeftSidebarOffset
-            topMargin: (visualsRoot.staticLeftSidebarOffset > 0 && !visualsRoot.barBottom) ? visualsRoot.sidebarTopOffset : (hasTopFrame ? frameThickness : Math.max(frameThickness, visualsRoot.totalTopPush))
-            bottomMargin: (visualsRoot.staticLeftSidebarOffset > 0 && visualsRoot.barBottom) ? visualsRoot.sidebarBottomOffset : (hasBottomFrame ? frameThickness : Math.max(frameThickness, visualsRoot.totalBottomPush))
+            topMargin: (visualsRoot.staticLeftSidebarOffset > 0 && !visualsRoot.barBottom) ? visualsRoot.sidebarTopOffset : visualsRoot.topEdge
+            bottomMargin: (visualsRoot.staticLeftSidebarOffset > 0 && visualsRoot.barBottom) ? visualsRoot.sidebarBottomOffset : visualsRoot.bottomEdge
         }
         width: frameThickness
     }
@@ -334,8 +362,8 @@ Item {
             bottom: parent.bottom
             right: parent.right
             rightMargin: (!hasRightFrame) ? -Math.max(0, frameThickness - visualsRoot.vBarHiddenAmount) : visualsRoot.staticRightSidebarOffset
-            topMargin: (visualsRoot.staticRightSidebarOffset > 0 && !visualsRoot.barBottom) ? visualsRoot.sidebarTopOffset : (hasTopFrame ? frameThickness : Math.max(frameThickness, visualsRoot.totalTopPush))
-            bottomMargin: (visualsRoot.staticRightSidebarOffset > 0 && visualsRoot.barBottom) ? visualsRoot.sidebarBottomOffset : (hasBottomFrame ? frameThickness : Math.max(frameThickness, visualsRoot.totalBottomPush))
+            topMargin: (visualsRoot.staticRightSidebarOffset > 0 && !visualsRoot.barBottom) ? visualsRoot.sidebarTopOffset : visualsRoot.topEdge
+            bottomMargin: (visualsRoot.staticRightSidebarOffset > 0 && visualsRoot.barBottom) ? visualsRoot.sidebarBottomOffset : visualsRoot.bottomEdge
         }
         width: frameThickness
     }
@@ -345,7 +373,7 @@ Item {
         anchors {
             bottom: parent.bottom
             left: parent.left
-            bottomMargin: hasBottomFrame ? frameThickness : Math.max(frameThickness, visualsRoot.totalBottomPush)
+            bottomMargin: visualsRoot.bottomEdge
             leftMargin: hasLeftFrame ? frameThickness + visualsRoot.staticLeftSidebarOffset : Math.max(frameThickness, visualsRoot.staticTotalLeftPush)
         }
         width: frameInnerCornerRadius
@@ -357,7 +385,7 @@ Item {
         anchors {
             top: parent.top
             left: parent.left
-            topMargin: hasTopFrame ? frameThickness : Math.max(frameThickness, visualsRoot.totalTopPush)
+            topMargin: visualsRoot.topEdge
             leftMargin: hasLeftFrame ? frameThickness + visualsRoot.staticLeftSidebarOffset : Math.max(frameThickness, visualsRoot.staticTotalLeftPush)
         }
         width: frameInnerCornerRadius
@@ -369,7 +397,7 @@ Item {
         anchors {
             top: parent.top
             right: parent.right
-            topMargin: hasTopFrame ? frameThickness : Math.max(frameThickness, visualsRoot.totalTopPush)
+            topMargin: visualsRoot.topEdge
             rightMargin: hasRightFrame ? frameThickness + visualsRoot.staticRightSidebarOffset : Math.max(frameThickness, visualsRoot.staticTotalRightPush)
         }
         width: frameInnerCornerRadius
@@ -381,7 +409,7 @@ Item {
         anchors {
             bottom: parent.bottom
             right: parent.right
-            bottomMargin: hasBottomFrame ? frameThickness : Math.max(frameThickness, visualsRoot.totalBottomPush)
+            bottomMargin: visualsRoot.bottomEdge
             rightMargin: hasRightFrame ? frameThickness + visualsRoot.staticRightSidebarOffset : Math.max(frameThickness, visualsRoot.staticTotalRightPush)
         }
         width: frameInnerCornerRadius

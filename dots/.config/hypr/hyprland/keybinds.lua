@@ -44,6 +44,7 @@ hl.bind("SUPER + ALT + T", hl.dsp.global("quickshell:clockToggle"), { descriptio
 hl.bind("SUPER + CTRL + E", hl.dsp.global("quickshell:easyEffectsToggle"), { description = "Shell: Toggle EasyEffects" })
 hl.bind("SUPER + U", hl.dsp.global("quickshell:usageToggle"), { description = "Shell: Toggle app usage stats" })
 hl.bind("SUPER + Y", hl.dsp.global("quickshell:modesToggle"), { description = "Shell: Toggle modes & routines" })
+hl.bind("SUPER + CTRL + H", hl.dsp.global("quickshell:healthToggle"), { description = "Shell: Toggle System Health" })
 --##! Screen & input
 hl.bind("SUPER + K", hl.dsp.global("quickshell:oskToggle"), { description = "Shell: Toggle on-screen keyboard" })
 hl.bind("SUPER + SHIFT + D", hl.dsp.global("quickshell:dictationToggle"), { description = "Shell: Toggle dictation" })
@@ -103,9 +104,13 @@ hl.bind("CTRL + SUPER + T", hl.dsp.exec_cmd(qsIsAlive .. " || " .. qsScripts .. 
 --##! User
 -- `qs kill` is the only shutdown that also takes the shell's child processes
 -- down with it, and it returns once the instance is really gone; killall is
--- kept for an instance too wedged to answer over IPC. MALLOC_CONF: see execs.lua.
+-- kept for an instance too wedged to answer over IPC. MALLOC_CONF and the guard:
+-- see execs.lua.
 hl.bind("CTRL + SUPER + R",
-    hl.dsp.exec_cmd("killall ydotool; qs kill -c $qsConfig || killall qs quickshell 2>/dev/null; MALLOC_CONF=narenas:1 qs -c $qsConfig &"),
+    hl.dsp.exec_cmd("killall ydotool; qs kill -c $qsConfig || killall qs quickshell 2>/dev/null; "
+        .. "g=" .. qsScripts .. "/quickshell-guard/qs-guard.sh; "
+        .. "if [ -x \"$g\" ]; then MALLOC_CONF=narenas:1 setsid -f \"$g\" -c $qsConfig; "
+        .. "else MALLOC_CONF=narenas:1 qs -c $qsConfig & fi"),
     { description = "Shell: Restart widgets" })
 --##! Bar & panels
 hl.bind("CTRL + SUPER + P", hl.dsp.global("quickshell:panelFamilyCycle"), { description = "Shell: Cycle panel family" })
@@ -142,6 +147,9 @@ hl.bind("SUPER + SHIFT + C",
 --# Display modes (extend, duplicate, single screen)
 hl.bind("SUPER + ALT + P", hl.dsp.global("quickshell:displayModesToggle"),
     { description = "Utilities: Display modes (extend, duplicate, single screen)" })
+--# Live draw (annotate the screen over every app)
+hl.bind("SUPER + ALT + D", hl.dsp.global("quickshell:liveDrawToggle"),
+    { description = "Utilities: Draw on screen" })
 --##! Screenshot & recording
 --# Recording stuff
 hl.bind("SUPER + SHIFT + R", hl.dsp.global("quickshell:regionRecord"),
@@ -218,6 +226,8 @@ hl.bind("SUPER + ALT + SHIFT + Tab", hl.dsp.global("quickshell:tilingLayoutCycle
 --     { non_consuming = true })
 hl.bind("SUPER + Q", hl.dsp.window.close(), { description = "Window: Close" })
 hl.bind("SUPER + SHIFT + ALT + Q", hl.dsp.exec_cmd("hyprctl kill"), { description = "Window: Forcefully zap a window" })
+hl.bind("SUPER + SHIFT + CTRL + Q", hl.dsp.global("quickshell:reopenClosedWindow"),
+    { description = "Window: Reopen the last closed window" })
 
 --# Window split ratio
 --#/# binde = SUPER, ;/',, # Adjust split ratio
@@ -281,8 +291,22 @@ for i = 1, 6 do
     hl.bind(keycombos[i], hl.dsp.window.move({ workspace = prefix[i] .. "1" })) -- # [hidden]
 end
 
-hl.bind("CTRL + SUPER + C", hl.dsp.exec_cmd(qsScripts .. "/hyprland/workspace_compactor"),
-    { description = "Workspaces: Compact into 1..N (remove empty gaps)" })
+hl.bind("CTRL + SUPER + C", hl.dsp.exec_cmd(qsScripts .. "/hyprland/workspace_arranger"),
+    { description = "Workspaces: Close gaps (renumber into 1..N)" })
+--# Insert an empty workspace and go to it, shifting the ones in the way up by one; SUPER+ALT also
+--# takes the focused window along
+hl.bind("CTRL + SUPER + I", hl.dsp.exec_cmd(qsScripts .. "/hyprland/workspace_arranger --insert=after"),
+    { description = "Workspaces: Insert empty workspace after current" })
+hl.bind("CTRL + SUPER + SHIFT + I", hl.dsp.exec_cmd(qsScripts .. "/hyprland/workspace_arranger --insert=before"),
+    { description = "Workspaces: Insert empty workspace before current" })
+hl.bind("CTRL + SUPER + Home", hl.dsp.exec_cmd(qsScripts .. "/hyprland/workspace_arranger --insert=first"),
+    { description = "Workspaces: Insert empty workspace first" })
+hl.bind("SUPER + ALT + I", hl.dsp.exec_cmd(qsScripts .. "/hyprland/workspace_arranger --insert=after --take"),
+    { description = "Window: Send to new workspace after current" })
+hl.bind("SUPER + ALT + SHIFT + I", hl.dsp.exec_cmd(qsScripts .. "/hyprland/workspace_arranger --insert=before --take"),
+    { description = "Window: Send to new workspace before current" })
+hl.bind("SUPER + ALT + Home", hl.dsp.exec_cmd(qsScripts .. "/hyprland/workspace_arranger --insert=first --take"),
+    { description = "Window: Send to new workspace first" })
 
 --##! Window
 hl.bind("SUPER + ALT + S", function()

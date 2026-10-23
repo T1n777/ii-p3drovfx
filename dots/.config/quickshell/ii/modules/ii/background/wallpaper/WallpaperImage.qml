@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Effects
+import QtQuick.Shapes
 import QtMultimedia
 import Quickshell
 import Quickshell.Wayland
@@ -340,6 +341,14 @@ Item {
     // The plane as it looks at rest, for Edit Mode's backdrop: sampled in its own coordinates,
     // so the sample stays full-screen while the plane itself is transformed into the card.
     readonly property alias wallpaperPlanesItem: wallpaperPlanes
+    // The depth cutout (background/depth/DepthCutoutLayer.qml) draws the
+    // subject in the widgets window and has to land on these exact pixels: it
+    // reads the plane's live geometry - the animated parallax included - from
+    // these items instead of recomputing it. Numbers only; nothing is
+    // reparented across the two windows.
+    readonly property alias depthContentItem: wallpaperContent
+    readonly property alias depthParallaxTranslate: parallaxTranslate
+    readonly property alias depthFramedItem: framedContent
 
     // ── Decode cap ────────────────────────────────────────────────────────────
     // A wallpaper larger than the plane it is drawn on costs RAM twice (decoded QImage plus GPU
@@ -587,6 +596,33 @@ Item {
         opacity: wallpaperImageRoot.overviewController.dimAmount
     }
 
+    // Real Gnome: GNOME Shell's radial shade over the blurred backing - the
+    // centre stays readable, the edges sink away from the workspace.
+    Shape {
+        id: realGnomeVignette
+        anchors.fill: overviewBackingImage
+        visible: wallpaperImageRoot.overviewController.isRealGnome && wallpaperImageRoot.overviewAnimationVisible
+        opacity: wallpaperImageRoot.overviewController.vignetteAmount
+        preferredRendererType: Shape.CurveRenderer
+        ShapePath {
+            strokeWidth: -1
+            fillGradient: RadialGradient {
+                centerX: realGnomeVignette.width / 2
+                centerY: realGnomeVignette.height / 2
+                centerRadius: Math.hypot(realGnomeVignette.width, realGnomeVignette.height) / 2
+                focalX: centerX
+                focalY: centerY
+                GradientStop { position: 0.0; color: "#00000000" }
+                GradientStop { position: 0.45; color: "#14000000" }
+                GradientStop { position: 1.0; color: "#8c000000" }
+            }
+            PathRectangle {
+                width: realGnomeVignette.width
+                height: realGnomeVignette.height
+            }
+        }
+    }
+
     Rectangle {
         id: materialShapeSolidBackdrop
         anchors.fill: parent
@@ -681,6 +717,40 @@ Item {
             visible: false
         }
 
+        // Real Gnome: the plane steps aside while the transition layer's cards
+        // (painting this exact wallpaper, published below) slide the workspaces.
+        readonly property bool realGnomePlaneHidden: Boolean(GlobalStates.realGnomePlaneHiddenScreens[wallpaperImageRoot.screenName])
+        function publishRealGnomeWallpaper() {
+            if (!wallpaperImageRoot.overviewController || !wallpaperImageRoot.overviewController.isRealGnome
+                    || wallpaperImageRoot.screenName === "" || wallpaper.imageSource === "")
+                return;
+            const r = wallpaperContent.mapToItem(centralWallpaperClipRect, 0, 0, wallpaperContent.width, wallpaperContent.height);
+            GlobalStates.setRealGnomePlaneWallpaper(wallpaperImageRoot.screenName, {
+                source: String(wallpaper.imageSource),
+                x: r.x, y: r.y, width: r.width, height: r.height,
+                decodeWidth: wallpaperImageRoot.stableDecodeSize.width,
+                decodeHeight: wallpaperImageRoot.stableDecodeSize.height,
+                mipmap: !wallpaperImageRoot.decodeCapped
+            });
+        }
+        Timer {
+            id: realGnomeWallpaperTimer
+            interval: 60
+            onTriggered: wallpaperPlanes.publishRealGnomeWallpaper()
+        }
+        Connections {
+            target: wallpaperImageRoot
+            function onOverviewAnimationVisibleChanged() { realGnomeWallpaperTimer.restart(); }
+            // Parallax moves all day; only an open Real Gnome overview reads the box.
+            function onEffectiveParallaxXChanged() { if (wallpaperImageRoot.overviewAnimationVisible && wallpaperImageRoot.overviewController.isRealGnome) realGnomeWallpaperTimer.restart(); }
+            function onEffectiveParallaxYChanged() { if (wallpaperImageRoot.overviewAnimationVisible && wallpaperImageRoot.overviewController.isRealGnome) realGnomeWallpaperTimer.restart(); }
+            function onStableDecodeSizeChanged() { realGnomeWallpaperTimer.restart(); }
+        }
+        Connections {
+            target: wallpaper
+            function onImageSourceChanged() { realGnomeWallpaperTimer.restart(); }
+        }
+
         StyledRectangularShadow {
             id: centralWallpaperShadow
             target: centralWallpaperClipRect
@@ -692,7 +762,7 @@ Item {
             visible: wallpaperImageRoot.isGnomeLikeOverview
                 ? wallpaperImageRoot.scaleProgress > 0.01
                 : wallpaperImageRoot.overviewController.shadowAmount > 0.01
-            opacity: scaleProgress
+            opacity: wallpaperPlanes.realGnomePlaneHidden ? 0 : scaleProgress
         }
 
         Rectangle {
@@ -702,6 +772,7 @@ Item {
             width: screen.width
             height: screen.height
             color: "transparent"
+            opacity: wallpaperPlanes.realGnomePlaneHidden ? 0 : 1
             radius: wallpaperImageRoot.isGnomeLikeOverview
                 ? wallpaperImageRoot.wallpaperClipRadius
                 : wallpaperImageRoot.overviewController.cornerRadius
@@ -712,6 +783,7 @@ Item {
                 ? CF.ColorUtils.transparentize(Appearance.colors.colPrimary, 0.35)
                 : "transparent"
             border.width: wallpaperImageRoot.overviewController.isGnomeLike && !wallpaperImageRoot.overviewController.scrollingLayout
+                    && !wallpaperImageRoot.overviewController.isRealGnome
                 ? 1.5 * wallpaperImageRoot.scaleProgress
                 : 0
 

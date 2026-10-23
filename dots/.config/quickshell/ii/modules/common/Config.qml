@@ -1034,6 +1034,15 @@ Singleton {
         });
     }
 
+    // A photo widget's own picture, on its entry, so two instances of the same
+    // widget each keep theirs. No key = the widget type's shared picture;
+    // "" = no picture of its own (it shows the wallpaper).
+    function updateWidgetImagePath(instanceId, path) {
+        root._editWidgetEntry(instanceId, entry => {
+            entry.imagePath = path;
+        });
+    }
+
     // A pinned widget ignores drags and the resize grip whatever the global
     // lock says. Stored only when set, so untouched entries stay as they were.
     function updateWidgetPinned(instanceId, pinned) {
@@ -1101,7 +1110,7 @@ Singleton {
     //
     // Bump `currentConfigVersion` and add a matching block to `migrateRaw()`
     // whenever an existing key changes type or meaning.
-    readonly property int currentConfigVersion: 29
+    readonly property int currentConfigVersion: 31
     // Defaults have to be captured before the file lands, because deserializing
     // is what destroys them. FileView loads asynchronously, so at component
     // completion the adapter still holds nothing but the QML defaults.
@@ -1823,6 +1832,41 @@ Singleton {
             console.log("[Config] Migrated overlay buttons: added perfMonitor");
         }
 
+        // v29 -> v30: the workspace compactor became the workspace arranger (it opens
+        // workspaces too), and its auto-compact keys moved into bar.workspaces.arranger.
+        const ws = raw.bar?.workspaces;
+        if (from < 30 && ws && typeof ws === "object") {
+            const legacy = {
+                "autoCompact": "autoCloseGaps",
+                "autoCompactCurrentGap": "currentGap",
+                "autoCompactDelay": "delay"
+            };
+            if (Object.keys(legacy).some(k => k in ws)) {
+                if (!ws.arranger || typeof ws.arranger !== "object")
+                    ws.arranger = {};
+                for (const k in legacy) {
+                    if (k in ws && !(legacy[k] in ws.arranger))
+                        ws.arranger[legacy[k]] = ws[k];
+                    delete ws[k];
+                }
+                console.log("[Config] Migrated workspace compactor keys into bar.workspaces.arranger");
+            }
+        }
+
+        // v30 -> v31: the desktop icon menu's "Open in Zed" became the editor
+        // entry, which runs apps.editor; an arranged menu keeps it where it was.
+        if (from < 31 && Array.isArray(raw.contextMenu?.layouts)) {
+            for (const layout of raw.contextMenu.layouts) {
+                if (!layout || layout.menu !== "desktopItem")
+                    continue;
+                for (const key of ["order", "bar", "hidden"]) {
+                    if (Array.isArray(layout[key]))
+                        layout[key] = layout[key].map(id => id === "zed" ? "editor" : id);
+                }
+            }
+            console.log("[Config] Migrated desktop icon menu: zed -> editor");
+        }
+
         raw.configVersion = root.currentConfigVersion;
         console.log(`[Config] Migrated config schema ${from} -> ${root.currentConfigVersion}`);
         return true;
@@ -1924,6 +1968,8 @@ Singleton {
     // aliases) is left out on purpose.
     readonly property var enumConstraints: ({
             "panelFamily": ["ii", "tablet", "waffle"],
+            "contextMenu.style": ["comfortable", "compact"],
+            "contextMenu.submenus": ["inline", "cascade"],
             "ai.tools.mode": ["functions", "search", "none"],
             "policies.ai": [0, 1, 2],
             "policies.weeb": [0, 1, 2],
@@ -1937,8 +1983,8 @@ Singleton {
             "phone.webcam.connection": ["wifi", "usb"],
             "appearance.fakeScreenRounding": [0, 1, 2, 3, 4],
             "background.zoomOutStyle": [0, 1, 2],
-            "background.overviewBackgroundStyle": ["", "gnome", "soft-focus", "camera-push", "depth", "card-lift", "desaturate", "directional", "material-shape"],
-            "background.mediaMode.visualizerMode": [0, 1, 2, 3],
+            "background.overviewBackgroundStyle": ["", "gnome", "real-gnome", "soft-focus", "camera-push", "depth", "card-lift", "desaturate", "directional", "material-shape"],
+            "background.mediaMode.visualizerMode": [0, 1, 2, 3, 4, 5],
             "background.mediaMode.syllable.textHighlightStyle": [0, 1],
             "bar.cornerStyle": [0, 1, 2, 3],
             "bar.barGroupStyle": [0, 1, 2],
@@ -1975,6 +2021,7 @@ Singleton {
             "search.typingTest.mode": ["time", "words", "zen"],
             "search.typingTest.wordlistSize": ["standard", "extended"],
             "search.typingTest.caretStyle": ["line", "block", "underline", "off"],
+            "search.appearance.resultsStyle": ["classic", "expressive"],
             "search.typingTest.keyboard.layout": ["qwerty", "qwertz", "azerty", "dvorak", "colemak", "vial"],
             "search.typingTest.sounds.theme": ["click1", "click2", "click3", "click4", "click5", "click6", "click7"],
             "search.typingTest.sounds.errorTheme": ["error1", "error2", "error3", "error4"],
@@ -3069,6 +3116,11 @@ Singleton {
                 // Keep blurSize at its existing path for presets. These defaults
                 // match the II Hyprland look; the compositor still owns enabled.
                 property JsonObject blur: JsonObject {
+                    // Compositor blur for windows and shell surfaces: "live" blurs what
+                    // is behind, "xray" only the cached wallpaper (cheap), "off" none.
+                    property string mode: "live"
+                    // Every app window opaque, over the per-app opacity rules.
+                    property bool opaqueWindows: false
                     property bool advancedOptions: false
                     property int passes: 3
                     property real noise: 0.05
@@ -3166,6 +3218,7 @@ Singleton {
             property JsonObject apps: JsonObject {
                 property string bluetooth: "kcmshell6 kcm_bluetooth"
                 property string changePassword: "kitty -1 --hold=yes fish -i -c 'passwd'"
+                property string editor: "zeditor" // The desktop icon menu's "Open in", given the path
                 property string network: "kcmshell6 kcm_networkmanagement"
                 property string manageUser: "kcmshell6 kcm_users"
                 property string networkEthernet: "kcmshell6 kcm_networkmanagement"
@@ -3179,7 +3232,8 @@ Singleton {
             // that reads its flags once at startup, so everything above the display
             // options relaunches it rather than taking effect in place.
             property JsonObject appStats: JsonObject {
-                property bool enable: true
+                // Off by default: the user turns usage tracking on in Settings.
+                property bool enable: false
                 property int sampleIntervalMs: 10000
                 property int flushIntervalMs: 60000
                 // Days of history kept. Under "previousMonth" this is a floor rather
@@ -3253,10 +3307,11 @@ Singleton {
                 property bool pinForEdits: false
             }
 
-            // Modes & Routines (services/Modes.qml). Definitions are user data
-            // but live here on purpose so one file carries the whole setup.
+            // Modes & Routines (services/Modes.qml). Definitions are user data kept
+            // in this file, but presets never carry them (presets_helper.py MODES_PATHS).
             property JsonObject modes: JsonObject {
-                property bool enable: true
+                // Off by default: once on, modes and routines start on their own triggers.
+                property bool enable: false
                 // Loads the Modes & Routines app (named from when it was an overlay).
                 property bool overlayEnabled: true
                 // Presets are added once; deleting one afterwards sticks.
@@ -3282,6 +3337,8 @@ Singleton {
                     property bool useLauncherClasses: true
                     property bool useDesktopCategory: true
                     property bool useGpuHeuristic: true
+                    // MangoHud's log as a game signal; keeps its logging armed
+                    property bool useMangoHudLog: false
                     property int gpuThreshold: 45
                     property int holdSec: 20
                     property list<string> extraClasses: []
@@ -3438,6 +3495,32 @@ Singleton {
                         property real dateSpacing: -8
                         property string clockFontVariant: "bold"
                         property string dateFontVariant: "medium"
+                    }
+                    property JsonObject clock_ios_tile: JsonObject {
+                        property bool enable: false
+                        property string placementStrategy: "free"
+                        property real x: 200
+                        property real y: 200
+                        property int widgetSize: 100
+                        property bool showTicks: true
+                    }
+                    property JsonObject clock_ios_analog: JsonObject {
+                        property bool enable: false
+                        property string placementStrategy: "free"
+                        property real x: 200
+                        property real y: 200
+                        property int widgetSize: 100
+                        property bool showSeconds: true
+                        property bool showDial: true
+                    }
+                    property JsonObject clock_california: JsonObject {
+                        property bool enable: false
+                        property string placementStrategy: "free"
+                        property real x: 200
+                        property real y: 200
+                        property int widgetSize: 100
+                        property bool showSeconds: true
+                        property bool showDate: true
                     }
                     property JsonObject clock_nothing: JsonObject {
                         property bool enable: false
@@ -3635,6 +3718,30 @@ Singleton {
                         property bool useBlackBg: false
                         property bool enableGlassReflection: false
                     }
+                    property JsonObject photo_plain_1x1: JsonObject {
+                        property bool enable: false
+                        property string placementStrategy: "free"
+                        property real x: 400
+                        property real y: 100
+                        property int widgetSize: 100
+                        property string imagePath: ""
+                    }
+                    property JsonObject photo_plain_2x1: JsonObject {
+                        property bool enable: false
+                        property string placementStrategy: "free"
+                        property real x: 400
+                        property real y: 100
+                        property int widgetSize: 100
+                        property string imagePath: ""
+                    }
+                    property JsonObject photo_plain_1x2: JsonObject {
+                        property bool enable: false
+                        property string placementStrategy: "free"
+                        property real x: 400
+                        property real y: 100
+                        property int widgetSize: 100
+                        property string imagePath: ""
+                    }
                     property JsonObject photo_1x1: JsonObject {
                         property bool enable: false
                         property string placementStrategy: "free"
@@ -3696,6 +3803,27 @@ Singleton {
                         property string aspectRatio: "2x0.5"
                         property bool showDetails: true
                     }
+                    property JsonObject resource_columns: JsonObject {
+                        property bool enable: false
+                        property string placementStrategy: "free"
+                        property real x: 400
+                        property real y: 100
+                        property int widgetSize: 100
+                        property string orientation: "horizontal"
+                        property list<string> items: ["cpu", "ram", "disk"]
+                        property bool showLabels: true
+                    }
+                    property JsonObject resource_tiles: JsonObject {
+                        property bool enable: false
+                        property string placementStrategy: "free"
+                        property real x: 400
+                        property real y: 100
+                        property int widgetSize: 100
+                        property string orientation: "horizontal"
+                        property list<string> items: ["cpu", "ram", "disk"]
+                        property bool showOrnament: true
+                        property bool showDetail: true
+                    }
                     property JsonObject resource_fill_cards: JsonObject {
                         property bool enable: false
                         property string placementStrategy: "free"
@@ -3706,6 +3834,59 @@ Singleton {
                         property bool enableCpu: true
                         property bool enableRam: true
                         property bool enableDisk: true
+                    }
+                    property JsonObject clock_type_weight: JsonObject {
+                        property bool enable: false
+                        property string placementStrategy: "free"
+                        property real x: 200
+                        property real y: 200
+                        property int widgetSize: 100
+                        property bool showBackground: true
+                        property bool textShadow: true
+                        property bool weightFollowsMinutes: true
+                    }
+                    property JsonObject clock_type_width: JsonObject {
+                        property bool enable: false
+                        property string placementStrategy: "free"
+                        property real x: 200
+                        property real y: 200
+                        property int widgetSize: 100
+                        property bool showBackground: true
+                        property bool textShadow: true
+                        property bool widthFollowsHour: true
+                        property bool showPartOfDay: true
+                    }
+                    property JsonObject clock_type_stack: JsonObject {
+                        property bool enable: false
+                        property string placementStrategy: "free"
+                        property real x: 200
+                        property real y: 200
+                        property int widgetSize: 100
+                        property bool showBackground: true
+                        property bool textShadow: true
+                        property bool heavyTop: true
+                    }
+                    property JsonObject clock_numeral: JsonObject {
+                        property bool enable: false
+                        property string placementStrategy: "free"
+                        property real x: 200
+                        property real y: 200
+                        property int widgetSize: 100
+                        property bool showBackground: true
+                        property bool textShadow: true
+                        property bool romanNumerals: false
+                        property bool showDate: true
+                    }
+                    property JsonObject clock_duo: JsonObject {
+                        property bool enable: false
+                        property string placementStrategy: "free"
+                        property real x: 200
+                        property real y: 200
+                        property int widgetSize: 100
+                        property bool showBackground: true
+                        property bool textShadow: true
+                        property bool wavyRing: true
+                        property bool showNumerals: true
                     }
                     property JsonObject grid_card_clock: JsonObject {
                         property bool enable: false
@@ -3918,6 +4099,69 @@ Singleton {
                         property real y: 200
                         property bool expressiveColors: false
                     }
+                    property JsonObject calendar_date_stack: JsonObject {
+                        property bool enable: false
+                        property string placementStrategy: "free"
+                        property real x: 200
+                        property real y: 200
+                        property int widgetSize: 100
+                        property bool showShape: true
+                        property bool showWeekNumber: true
+                    }
+                    property JsonObject calendar_date_banner: JsonObject {
+                        property bool enable: false
+                        property string placementStrategy: "free"
+                        property real x: 200
+                        property real y: 200
+                        property int widgetSize: 100
+                        property bool italicHeadline: true
+                        property bool showNextEvent: true
+                    }
+                    property JsonObject calendar_week_strip: JsonObject {
+                        property bool enable: false
+                        property string placementStrategy: "free"
+                        property real x: 200
+                        property real y: 200
+                        property int widgetSize: 100
+                        property bool showEventDots: true
+                        property bool dimPastDays: true
+                    }
+                    property JsonObject calendar_week_agenda: JsonObject {
+                        property bool enable: false
+                        property string placementStrategy: "free"
+                        property real x: 200
+                        property real y: 200
+                        property int widgetSize: 100
+                        property int maxEventsPerDay: 2
+                        property bool dimPastDays: true
+                    }
+                    property JsonObject calendar_month_tall: JsonObject {
+                        property bool enable: false
+                        property string placementStrategy: "free"
+                        property real x: 200
+                        property real y: 200
+                        property int widgetSize: 100
+                        property bool showEventDots: true
+                        property bool showOtherMonths: false
+                    }
+                    property JsonObject calendar_date_type: JsonObject {
+                        property bool enable: false
+                        property string placementStrategy: "free"
+                        property real x: 200
+                        property real y: 200
+                        property int widgetSize: 100
+                        property bool heavyFirst: true
+                        property bool accentWord: false
+                    }
+                    property JsonObject calendar_date_shapes: JsonObject {
+                        property bool enable: false
+                        property string placementStrategy: "free"
+                        property real x: 200
+                        property real y: 200
+                        property int widgetSize: 100
+                        property string dayShape: "Clover4Leaf"
+                        property bool showWeekShapes: true
+                    }
                     property JsonObject calendar_upcoming_3days: JsonObject {
                         property bool enable: false
                         property string placementStrategy: "free"
@@ -4095,6 +4339,47 @@ Singleton {
                         property bool enableInnerShadow: false
                         property int widgetSize: 100
                     }
+                    property JsonObject media_poster: JsonObject {
+                        property bool enable: false
+                        property string placementStrategy: "free"
+                        property real x: 200
+                        property real y: 200
+                        property int widgetSize: 100
+                        property bool dynamicAlbumColors: false
+                        property string artShape: "Puffy"
+                        property bool accentTitle: true
+                        property bool showPlayLabel: true
+                    }
+                    property JsonObject media_deck: JsonObject {
+                        property bool enable: false
+                        property string placementStrategy: "free"
+                        property real x: 200
+                        property real y: 200
+                        property int widgetSize: 100
+                        property bool dynamicAlbumColors: false
+                        property bool showPlayerChip: true
+                        property bool showTimes: true
+                    }
+                    property JsonObject media_halo: JsonObject {
+                        property bool enable: false
+                        property string placementStrategy: "free"
+                        property real x: 200
+                        property real y: 200
+                        property int widgetSize: 100
+                        property bool dynamicAlbumColors: false
+                        property bool morphArt: true
+                        property bool wavyRing: true
+                    }
+                    property JsonObject media_cover: JsonObject {
+                        property bool enable: false
+                        property string placementStrategy: "free"
+                        property real x: 200
+                        property real y: 200
+                        property int widgetSize: 100
+                        property bool dynamicAlbumColors: false
+                        property int blurStrength: 70
+                        property bool artistChip: true
+                    }
                     property JsonObject compact_media: JsonObject {
                         property bool enable: false
                         property string placementStrategy: "free"
@@ -4104,6 +4389,105 @@ Singleton {
                         property string backgroundShape: "Rectangle"
                         property bool enableShadows: false
                         property bool enableInnerShadow: false
+                        property int widgetSize: 100
+                    }
+                    property JsonObject todo_focus: JsonObject {
+                        property bool enable: false
+                        property string placementStrategy: "free"
+                        property real x: 400
+                        property real y: 120
+                        property int widgetSize: 100
+                        property bool showPosition: true
+                    }
+                    property JsonObject todo_board: JsonObject {
+                        property bool enable: false
+                        property string placementStrategy: "free"
+                        property real x: 400
+                        property real y: 120
+                        property int widgetSize: 100
+                    }
+                    property JsonObject todo_column: JsonObject {
+                        property bool enable: false
+                        property string placementStrategy: "free"
+                        property real x: 400
+                        property real y: 120
+                        property int widgetSize: 100
+                        property bool showProgress: true
+                    }
+                    property JsonObject timer_pomodoro: JsonObject {
+                        property bool enable: false
+                        property string placementStrategy: "free"
+                        property real x: 400
+                        property real y: 120
+                        property int widgetSize: 100
+                        property bool wavyRing: true
+                    }
+                    property JsonObject timer_stopwatch: JsonObject {
+                        property bool enable: false
+                        property string placementStrategy: "free"
+                        property real x: 400
+                        property real y: 120
+                        property int widgetSize: 100
+                    }
+                    property JsonObject timer_countdown: JsonObject {
+                        property bool enable: false
+                        property string placementStrategy: "free"
+                        property real x: 400
+                        property real y: 120
+                        property int widgetSize: 100
+                    }
+                    property JsonObject translator_widget: JsonObject {
+                        property bool enable: false
+                        property string placementStrategy: "free"
+                        property real x: 400
+                        property real y: 120
+                        property int widgetSize: 100
+                        property list<string> quickLanguages: ["en", "pt-BR", "es", "fr", "de", "ja"]
+                    }
+                    property JsonObject phone_key: JsonObject {
+                        property bool enable: false
+                        property string placementStrategy: "free"
+                        property real x: 400
+                        property real y: 120
+                        property int widgetSize: 100
+                    }
+                    property JsonObject phone_deck: JsonObject {
+                        property bool enable: false
+                        property string placementStrategy: "free"
+                        property real x: 400
+                        property real y: 120
+                        property int widgetSize: 100
+                    }
+                    property JsonObject phone_tower: JsonObject {
+                        property bool enable: false
+                        property string placementStrategy: "free"
+                        property real x: 400
+                        property real y: 120
+                        property int widgetSize: 100
+                    }
+                    property JsonObject send_drop: JsonObject {
+                        property bool enable: false
+                        property string placementStrategy: "free"
+                        property real x: 400
+                        property real y: 120
+                        property int widgetSize: 100
+                        property string backend: "kdeconnect"
+                        property string kdeDevice: ""
+                        property string localsendIp: ""
+                        property string localsendAlias: ""
+                    }
+                    property JsonObject session_grid: JsonObject {
+                        property bool enable: false
+                        property string placementStrategy: "free"
+                        property real x: 400
+                        property real y: 120
+                        property int widgetSize: 100
+                    }
+                    property JsonObject water_glass: JsonObject {
+                        property bool enable: false
+                        property string placementStrategy: "free"
+                        property real x: 400
+                        property real y: 120
                         property int widgetSize: 100
                     }
                     property JsonObject water_reminder: JsonObject {
@@ -4132,7 +4516,7 @@ Singleton {
                 // Desktop shortcut icon scale (apps, folders, files). Fixed
                 // steps only — 1, 1.25, 1.5 — written from the Edit Mode
                 // panel; the layer re-reads it, one binding, no rebuild.
-                property real desktopIconScale: 1.0
+                property real desktopIconScale: 1.5
                 // Drag-lock for desktop shortcut icons. The desktop menu's
                 // "Lock icons" row is the writer outside Settings; the layer
                 // reads it in one binding and gates only drag START — click,
@@ -4157,11 +4541,29 @@ Singleton {
                     property bool stacks: false // one stack per kind: apps, folders, files
                     property bool hidden: false // a clean desktop; the icons stay stored
                     property string labels: "always" // always | hover | never
-                    property int labelLines: 1 // 1 | 2
+                    property int labelLines: 2 // 1 | 2
                     property string labelStyle: "auto" // auto | shadow | pill
                     property string iconBackground: "none" // none | translucent | circle | squircle
                     property bool runningBadges: true // the dock's "open" dot under running apps
                     property bool notificationBadges: true // unread count from the app's notifications
+                    property bool linkBadges: true // the shortcut arrow on linked (dropped) files and folders
+                    // The launch pad: sections of icons named by their entry name or
+                    // path, each on a card at its own rectangle (x, y, width, height,
+                    // set by dragging and resizing the card; a section without one
+                    // gets one `groupColumns` cells wide under the lowest card), with
+                    // a caption over it; `shelf` draws the cards (the widgets' card
+                    // surface). Icons in no section - the arrivals strip - stay bare.
+                    property list<var> groups: [] // [{ "title": "Study", "items": ["M1 MCB", "Scrims"], "x": 8, "y": 110, "width": 264, "height": 191 }]
+                    property int groupColumns: 3
+                    property bool shelf: false
+                    // A soft shadow under every icon; hovering lifts the icon and
+                    // warms the shadow into a glow of the primary colour.
+                    property bool iconShadow: false
+                    // How app groups are drawn; a group can override both in its own
+                    // menu. auto follows the icon background, as groups always did.
+                    property string groupShape: "auto" // auto | rounded | squircle | circle | cookie | clover
+                    property string groupColor: "auto" // auto | primary | secondary | tertiary | neutral | glass
+                    property string groupIconMask: "auto" // auto | none | rounded | squircle | circle
                 }
                 property bool windowZoomOnOverview: true // fake window scale-out during overview (GNOME-like)
                 property bool windowZoomLiveCapture: true // keep screencopy live instead of freezing on overview open
@@ -4233,6 +4635,24 @@ Singleton {
                     property int radius: 50
                     property string direction: "top-to-bottom"
                 }
+                // The subject of the wallpaper cut out and drawn over the widgets
+                // (services/DepthEffect.qml). Off, and nothing downloaded, until
+                // the user fetches a model in Settings → Background.
+                property JsonObject depthEffect: JsonObject {
+                    property bool enable: false
+                    // The model a picture without its own choice uses; "" = the
+                    // first installed one.
+                    property string model: ""
+                    // Each widget's outline, in the widget's own colour, drawn
+                    // over the subject where the subject covers the widget.
+                    property bool outline: false
+                    // A notification when a model starts cutting a picture and
+                    // when it is done.
+                    property bool notify: true
+                    // Per picture, from Edit Mode's Wallpaper tab:
+                    //   [{ path, model }]   model "off" = no cutout for it
+                    property list<var> wallpapers: []
+                }
                 property JsonObject parallax: JsonObject {
                     property bool vertical: false
                     property bool autoVertical: false
@@ -4247,13 +4667,15 @@ Singleton {
                 }
                 property JsonObject mediaMode: JsonObject {
                     property bool immersive: false
+                    property bool kineticLyrics: false // Immersive only, BetterLyrics word-timed lines
+                    property bool kineticFisheye: false // Fisheye lens over the kinetic lyrics
                     property bool togglePerMonitor: true
                     property string backgroundShape: "Square"
                     property bool enableBackgroundAnimation: true // It **may** cause nausea for someone
                     property bool changeShellColor: true // Changes the shell color to the album color
                     property int backgroundOpacity: 50 // In percent
                     property int backgroundBlurRadius: 120
-                    property int visualizerMode: 0 // 0: Off, 1: Waves, 2: Bars, 3: Radial
+                    property int visualizerMode: 0 // 0: Off, 1: Waves, 2: Bars, 3: Radial, 4: Halo, 5: Spectrum
                     property bool showLyrics: true
                     property bool showPlayerSwitcher: true
                     property bool showSeekBar: true
@@ -4564,6 +4986,9 @@ Singleton {
                         property bool enable: true
                         property string side: "right"
                     }
+                    property JsonObject health: JsonObject {
+                        property bool enable: true
+                    }
                     // The teleprompter: a user script scrolling through the island.
                     // Every value here is read (and clamped) in one place, by
                     // services/Teleprompter.qml; the faces and the Settings page only
@@ -4617,23 +5042,24 @@ Singleton {
                     property string clock: "expressive" // default, material, expressive, neural, relief
                     property string media: "default" // default | expressive | neural | ring | tonal
                     property string notification: "default"
-                    property string utilButtons: "expressive" // default | expressive | segments
+                    property string utilButtons: "expressive" // default | expressive | segments | sculpt
                     property string workspaces: "default" // default | minimal | expressive | dock | index
-                    property string weather: "expressive"
-                    property string dashboard: "expressive" // default | expressive | orbs
-                    property string resources: "expressive"
+                    property string weather: "expressive" // default | expressive | horizon | tessera | sculpt
+                    property string dashboard: "expressive" // default | expressive | orbs | sculpt
+                    property string resources: "expressive" // default | expressive | sculpt
                     property string policies: "expressive" // default | expressive | outline
                     property string power: "expressive" // default | expressive | solid | dot
                     property string battery: "expressive"
                     property string systray: "expressive"
-                    property string bluetooth: "expressive"
-                    property string keyboard: "expressive"
+                    property string bluetooth: "expressive" // default | expressive | sculpt
+                    property string keyboard: "expressive" // default | material | expressive | sculpt
                     property string sports: "expressive"
                     property string portWatcher: "expressive"
+                    property string networkSpeed: "default" // default | expressive
                     property string aiPlanUsage: "expressive"
-                    property string search: "default"
+                    property string search: "default" // default | expressive | neural | sculpt
                     property string date: "default"
-                    property string timer: "expressive"
+                    property string timer: "expressive" // default | expressive | sculpt
                     property string recordIndicator: "expressive" // default | expressive | neural
                 }
 
@@ -4648,6 +5074,8 @@ Singleton {
                 property JsonObject weatherWidget: JsonObject {
                     property string horizonVariant: "balanced" // balanced | inverted | minimal
                     property string tesseraVariant: "paired" // paired | contrast | bare
+                    property string sculptVariant: "poster" // Sculpt style: poster | stamp | daylight
+                    property bool sculptShowDetails: true // Sculpt poster/daylight: condition, city, next sunrise/sunset
                     property string colorMode: "tonal" // Material pairs: tonal | vibrant | neutral
                 }
 
@@ -4688,8 +5116,9 @@ Singleton {
                     // its expanded face. Hovering reveals the contracted face at once.
                     property int hoverExpandDelayMs: 600
                     // The island's outer shell. "notch" hangs from the top edge with
-                    // concave shoulders; "island" is a free-floating pill that slides out
-                    // of view when it hides. Both host the same widgets.
+                    // concave shoulders; "sculpted" is the same notch with each side one
+                    // long S flaring into the edge; "island" is a free-floating pill
+                    // that slides out of view when it hides. All host the same widgets.
                     property string shape: "notch"
                     // A second, round surface beside the island. When media or a
                     // workspace change arrives while the island already shows something,
@@ -4787,17 +5216,21 @@ Singleton {
                     // EasyEffects' preset as a bubble for as long as it runs: scroll to
                     // switch, rest on it for the presets, bypass and the app.
                     property bool disableEasyEffects: false
+                    // A new critical System Health problem (a service failed, a program
+                    // crashed), with the fix as its button.
+                    property bool disableHealth: false
                     property bool clickToExpand: false
                     property bool centerInBar: false // "Dynamic Island in bar center" integration mode
                 }
 
-                property int barGroupStyle: 0 // 0: Pills | 1: Island (opaque) | 2: Transparent (or maybe line-separated in the future)
+                property int barGroupStyle: 0 // 0: Pills | 1: Island | 2: Transparent (or maybe line-separated in the future)
                 property string topLeftIcon: "spark" // Options: "distro" or any icon name in ~/.config/quickshell/ii/assets/icons
                 property bool useMaterialSymbolForTopLeftIcon: false
                 property int barBackgroundStyle: 1 // 0: Transparent | 1: Visible | 2: Adaptive
                 property bool transparentGlow: true
                 property bool expressiveColors: false
                 property string expressiveColorTheme: "content"
+                property bool amoledBackground: false // Pure black, opaque bar and dynamic island background
                 property bool verbose: true
                 property bool vertical: true
                 property bool enableVolumeScroll: true
@@ -4824,6 +5257,8 @@ Singleton {
                 }
 
                 property JsonObject resources: JsonObject {
+                    property string colorMode: "primary" // Sculpt style colour
+                    property string sculptVariant: "pressure" // Sculpt style: pressure | bars | trace
                     property bool showPercentageText: true
                     property bool alwaysShowRam: true
                     property bool alwaysShowCpu: true
@@ -4852,6 +5287,16 @@ Singleton {
                     property bool showWindowLabel: false
                     property bool hideWhenUnavailable: false
                     property int lowRemainingThreshold: 20
+                }
+
+                property JsonObject networkSpeed: JsonObject {
+                    property string mode: "both" // both | download | upload
+                    property string unit: "bytes" // bytes | bits
+                    property string expressiveVariant: "capsule" // capsule | split | graph | rows
+                    property string colorMode: "primary"
+                    property bool showUnit: true
+                    property bool compact: false
+                    property bool hideWhenOffline: false
                 }
 
                 property JsonObject portWatcher: JsonObject {
@@ -4899,6 +5344,7 @@ Singleton {
 
                 property JsonObject searchWidget: JsonObject {
                     property string sizeMode: "compact" // compact | balanced | extended
+                    property string sculptVariant: "field" // Sculpt style: field | display | split
                     property string colorMode: "tonal" // tonal | vibrant | neutral
                     property bool showShortcutHint: true
                 }
@@ -4967,12 +5413,14 @@ Singleton {
 
                 property JsonObject timers: JsonObject {
                     property string colorMode: "primary"
+                    property string sculptVariant: "squeeze" // Sculpt style: squeeze | fill | phases
                     property bool showPomodoro: true
                     property bool showStopwatch: true
                     property bool showCountdowns: true
                 }
                 property JsonObject utilButtons: JsonObject {
                     property string colorMode: "primary"
+                    property string sculptVariant: "toolbar" // Sculpt style: toolbar | media | shapes
                     property bool showScreenSnip: false
                     property bool showColorPicker: true
                     property bool showMicToggle: false
@@ -4983,6 +5431,7 @@ Singleton {
                     property bool isRecording: false
                     property bool showWallpaperToggle: true
                     property bool showPhoneMirror: false
+                    property bool showLiveDraw: true
                 }
                 property JsonObject workspaces: JsonObject {
                     property string colorMode: "primary"
@@ -5010,9 +5459,13 @@ Singleton {
                     property bool dockHoverEffect: true
                     property bool dockShowAppIcons: true
 
-                    property bool autoCompact: false // Run the workspace compactor automatically when a gap appears
-                    property string autoCompactCurrentGap: "onswitch" // Gap on the current workspace: "onswitch" | "immediate" | "never"
-                    property int autoCompactDelay: 600 // ms of quiet before an automatic compaction fires
+                    // The workspace arranger (scripts/hyprland/workspace_arranger): closes gaps in the
+                    // numbering and opens empty workspaces in between.
+                    property JsonObject arranger: JsonObject {
+                        property bool autoCloseGaps: false // Close a gap as soon as one appears
+                        property string currentGap: "onswitch" // Gap on the current workspace: "onswitch" | "immediate" | "never"
+                        property int delay: 600 // ms of quiet before an automatic close fires
+                    }
                 }
                 property JsonObject weather: JsonObject {
                     property bool enable: false
@@ -5043,6 +5496,7 @@ Singleton {
                     // Orbs style: a solid disc per indicator, or a ring with the
                     // bar showing through it.
                     property string orbVariant: "filled" // filled | outline
+                    property string sculptVariant: "tile" // Sculpt style: tile | chip | cluster
                     property bool showCaffeine: true
                     property bool showVolume: false
                     property bool showMic: true
@@ -5132,6 +5586,8 @@ Singleton {
                 }
                 property JsonObject keyboardLayout: JsonObject {
                     property string colorMode: "primary"
+                    property string sculptVariant: "selector" // Sculpt style: selector | carousel | dial
+                    property bool sculptShowName: true // Sculpt dial: the layout's full name beside it
                     property bool secondaryOpposite: false
                     property bool showSecondary: true
                     property bool showPrimary: true
@@ -5153,6 +5609,8 @@ Singleton {
                 }
                 property JsonObject bluetooth: JsonObject {
                     property string colorMode: "primary"
+                    property string sculptVariant: "ring" // Sculpt style: card | ring | badge
+                    property bool sculptShowName: true // Sculpt card/badge: the device's name
                 }
                 property JsonObject power: JsonObject {
                     property string colorMode: "primary"
@@ -5178,6 +5636,9 @@ Singleton {
                 // Announce the end of charging: a firmware charge limit holding the pack counts,
                 // and 101 above means the soft "nearly there" reminder is off.
                 property bool notifyCharged: true
+                // Opt-in: at 100 % on AC (or UPower's fully charged), show the default battery look
+                // instead of the charging bolt and green fill.
+                property bool defaultStateWhenFull: false
                 // Grace period between the low-battery warning and the suspend itself; 0 suspends
                 // immediately.
                 property int suspendWarningSeconds: 30
@@ -5305,6 +5766,8 @@ Singleton {
             property JsonObject crosshair: JsonObject {
                 // Valorant crosshair format. Use https://www.vcrdb.net/builder
                 property string code: "0;P;d;1;0l;10;0o;2;1b;0"
+                // Pin it over the game while one is running
+                property bool autoPin: false
             }
 
             // Speech typed into the focused window, through voxtype. Off by
@@ -5378,6 +5841,8 @@ Singleton {
                 property bool islandsStyle: false
                 property real islandSpacing: 8
                 property bool enableAppGroups: true
+                // Fold the least recently used apps into one ephemeral group when the tray runs out of room.
+                property bool autoOverflowGroup: true
                 property bool enableShapeMask: true
                 property string shapeMask: "Circle"
                 property real height: 56
@@ -5420,7 +5885,6 @@ Singleton {
                     }
                     property JsonObject timer: JsonObject {
                         // Quick-start durations, in minutes.
-                        property list<int> presets: [1, 5, 10, 25]
                         property bool clickPauses: true
                     }
                     property JsonObject pomodoro: JsonObject {
@@ -5545,7 +6009,11 @@ Singleton {
                     property bool fasterTouchpadScroll: false // Enable faster scrolling with touchpad
                     property int mouseScrollDeltaThreshold: 120 // delta >= this then it gets detected as mouse scroll rather than touchpad
                     property int mouseScrollFactor: 120
+                    // Touchpad speed while fasterTouchpadScroll is on: px per 10 px of finger
+                    // (ScrollWheel.touchpadStep). Off, the touchpad moves 1:1 with the fingers.
                     property int touchpadScrollFactor: 450
+                    // The content keeps gliding for a moment after the fingers lift (TouchpadKinetic)
+                    property bool touchpadKinetic: true
                     // Off: plain lists keep Qt's own mouse wheel unless fasterTouchpadScroll is on.
                     // On: every list moves mouseScrollFactor px per wheel notch.
                     property bool uniformMouseWheel: false
@@ -5831,6 +6299,7 @@ Singleton {
             property JsonObject media: JsonObject {
                 property bool filterDuplicatePlayers: true
                 property string priorityPlayer: ""
+                property bool preferMusicPlayers: false
                 property bool dynamicAlbumColors: true
                 property bool albumArtBlurAnimations: true
             }
@@ -5851,7 +6320,7 @@ Singleton {
             }
 
             property JsonObject oledSaver: JsonObject {
-                property bool enable: true
+                property bool enable: false
                 property bool antiBurnIn: false // periodically shift widgets to prevent OLED burn-in
                 property int cursorHideDelay: 5 // seconds of no mouse movement before the cursor hides again
                 property int lockTimeout: 10 // minutes without input on the lock screen before it turns into the Always On Display; 0 = never
@@ -5987,6 +6456,9 @@ Singleton {
              */
             property JsonObject easyEffects: JsonObject {
                 property bool appEnable: true
+                // Which build to run when both are installed: the distro package (false) or
+                // the Flatpak. Also read by the Hyprland autostart (hyprland/execs.lua).
+                property bool preferFlatpak: false
                 property string startTab: "last" // "last" | "presets" | "effects" | "devices"
                 // What the quick switchers cycle: "device" keeps to the family of the output
                 // device's default preset ("A50 · Music" -> every "A50 · …"), "all" is every preset.
@@ -6040,6 +6512,34 @@ Singleton {
             }
 
             /**
+             * Live draw on the desktop (Super+Alt+D). Only whether it exists and what the
+             * mouse does live out here; the pen's own preferences (pressure, smoothing,
+             * width, palette, workspace slide) are shared with the tablet family under
+             * `tablet.liveDraw`, and every one of them is edited from the drawing toolbar's
+             * settings popup.
+             */
+            property JsonObject liveDraw: JsonObject {
+                property bool enable: true
+                /// How hard a mouse or a finger stroke is steadied, 0–100. The brush trails
+                /// the pointer on a short string, so the tremble of a hand on a mouse never
+                /// reaches the ink. A pen is never steadied this way: it is precise already.
+                property int mouseSmoothing: 60
+                /// "workspace": each workspace keeps its own drawing. "screen": one drawing
+                /// per monitor that stays put whatever workspace is in front.
+                property string sheetMode: "workspace"
+                /// The system crosshair instead of the drawn ring under the pointer: the
+                /// ring is a frame of a screen-sized surface on every pointer move.
+                property bool nativeCursor: false
+                /// The board's pattern: "none", "grid", "dots" or "lines".
+                property string boardPattern: "grid"
+                /// The board's two tones. Literal colours on purpose, like the palette:
+                /// a board is paper and chalkboard, and ink chosen against it must not
+                /// change colour when the wallpaper does.
+                property string boardLight: "#f7f6f2"
+                property string boardDark: "#1f2124"
+            }
+
+            /**
              * The clock app. Only whether it exists lives out here; every clock option is
              * edited from the app's own settings page.
              */
@@ -6061,6 +6561,12 @@ Singleton {
                     property int remindEveryMinutes: 15
                     // A night ends at this hour of the next morning.
                     property int nightEndsHour: 5
+                    // Intrusive mode: past bedtime a full-screen modal takes over; a few
+                    // short snoozes, then a countdown and a forced shutdown.
+                    property bool intrusive: false
+                    property int snoozeMinutes: 5
+                    property int maxSnoozes: 3
+                    property int shutdownGraceSeconds: 30
                 }
                 // Mirror the phone's next alarm over ADB (read-only).
                 property JsonObject phoneAlarm: JsonObject {
@@ -6111,6 +6617,88 @@ Singleton {
                 }
             }
 
+            /**
+             * System Health: failed services, crashes, new journal errors, drives,
+             * firmware and update chores, watched by the `health_watch` helper and shown
+             * in the app on Ctrl+Super+H. Every option below is edited from the app's
+             * own Settings page; the helper restarts when one of them changes.
+             */
+            property JsonObject health: JsonObject {
+                property bool enable: true
+                property JsonObject alerts: JsonObject {
+                    // A strip on the island for a new critical problem.
+                    property bool island: true
+                    // A notification instead when the island is off.
+                    property bool notifyFallback: true
+                    // Alerts wait while the focused window is fullscreen (games too) or
+                    // Do Not Disturb is on, and arrive as one summary afterwards.
+                    property bool holdInFullscreen: true
+                    property int maxPer10Min: 3
+                }
+                property JsonObject sources: JsonObject {
+                    property bool units: true
+                    property bool userUnits: true
+                    property bool appLaunches: true
+                    property bool crashes: true
+                    property bool journal: true
+                    property bool drives: true
+                    property bool filesystems: true
+                    property bool firmware: true
+                    property bool packages: true
+                    property bool pressure: true
+                    property bool thermals: true
+                    property bool timesync: true
+                    // Packages built here that a library or Qt update broke.
+                    property bool rebuild: true
+                    // The shell's own helpers and memory.
+                    property bool shell: true
+                    // How long each boot took, and which unit slowed it.
+                    property bool boot: true
+                    // Battery wear, GPU resets, machine checks, OOM kills, fans, buses.
+                    property bool hardware: true
+                    // QML errors in the shell's log. Off: following the log keeps a
+                    // `qs log` process of about 50 MB running.
+                    property bool shellLog: false
+                }
+                property JsonObject noise: JsonObject {
+                    // A journal error group is "known" once it appeared on this many of
+                    // the last `ofLastBoots` boots; known groups never alert.
+                    property int knownAfterBoots: 3
+                    property int ofLastBoots: 5
+                    // A known group that stayed away this long counts as new again.
+                    property int quietDaysForNew: 14
+                }
+                property JsonObject thresholds: JsonObject {
+                    property int diskWarnPercent: 90
+                    property int diskCritPercent: 97
+                    property int psiMemPercent: 10
+                    property int restartLoop: 5
+                    // The shell's memory, in MiB, past which it is a finding.
+                    property int shellMemoryMb: 1200
+                    // Battery health (full charge against design, %) to warn below;
+                    // 20 points lower is critical.
+                    property int batteryWearPercent: 80
+                }
+                property JsonObject assistant: JsonObject {
+                    // The "Explain with the assistant" button. Nothing is sent until it
+                    // is pressed; `policies.ai` = 0 hides it as well.
+                    property bool enable: true
+                    // User and host names, the home path, IP and MAC addresses are
+                    // replaced before anything leaves the computer.
+                    property bool redact: true
+                }
+                property int historyDays: 30
+                // scripts/quickshell-guard/qs-guard.sh, which starts the shell: read
+                // from config.json at the next start, since the shell is not up yet.
+                property JsonObject guard: JsonObject {
+                    // Hyprland notifications when the shell cannot start or crashes,
+                    // and a restart after a crash. Off: the guard just runs qs.
+                    property bool enable: true
+                    // A terminal on the rebuild script when a Qt update is why.
+                    property bool openTerminal: true
+                }
+            }
+
             property JsonObject overlay: JsonObject {
                 property bool openingZoomAnimation: true
                 property bool darkenScreen: true
@@ -6139,9 +6727,13 @@ Singleton {
                     property bool blurEnabled: true
                     property bool autoResize: true
                     property bool speakingPulseContinuous: true
+                    // Pin the overlay on screen while the bridge sees a call
+                    property bool autoPin: false
                 }
                 // Performance HUD (RivaTuner style). Frame rate comes from MangoHud's logger.
                 property JsonObject perfMonitor: JsonObject {
+                    // Pin the HUD on screen while a game is detected
+                    property bool autoPin: false
                     property string style: "bars" // bars | graph | text
                     property string palette: "accent" // accent | container | mono
                     property bool fpsOnly: false
@@ -6240,6 +6832,17 @@ Singleton {
                 property bool searchAnywhere: false
             }
 
+            // Ctrl+Shift+Super+Q starts the app of the last closed window again, on its workspace.
+            property JsonObject reopenClosedWindow: JsonObject {
+                property bool enable: true
+                // How many closed windows are remembered. Memory only, never written to disk.
+                property int depth: 10
+                // A window closed sooner than this after it opened (a splash screen, a prompt) is not remembered.
+                property int minLifetimeMs: 1500
+                // App classes whose closes are never remembered, matched case-insensitively.
+                property list<string> ignoredClasses: ["org.quickshell", "quickshell", "xdg-desktop-portal-gtk", "org.freedesktop.impl.portal.desktop.kde", "org.kde.polkit-kde-authentication-agent-1", "hyprpolkitagent", "hyprland-share-picker", "pinentry-qt", "gcr-prompter"]
+            }
+
             property JsonObject overview: JsonObject {
                 property bool enable: true
                 // Reuse the Tablet Family's app drawer as the ii family's primary
@@ -6260,12 +6863,36 @@ Singleton {
                 property bool orderBottomUp: false
                 property bool showIcons: true
                 property bool centerIcons: true
+                // Window cards of the workspace grid: "classic" (centred icons, outlined
+                // current workspace) or "recents" (app chips with a window menu).
+                property string cardDesign: "classic"
                 property bool showOpeningAnimation: true
                 property bool useWorkspaceMap: false
 
                 property JsonObject scrollingStyle: JsonObject {
                     property string zoomStyle: "out"        // Options: in, out
                 }
+            }
+
+            // Every ii right-click menu (desktop, desktop icon, dock, Edit Mode,
+            // tray, overview window). The menus themselves are declared in
+            // services/ContextMenus.qml; these keys only hold what the user changed.
+            property JsonObject contextMenu: JsonObject {
+                // "comfortable" (58 px pill rows) or "compact" (34 px rows, an
+                // icon bar on top, the card as narrow as its content).
+                property string style: "comfortable"
+                // "inline" swaps a submenu into the same card; "cascade" opens it
+                // as a second card beside the menu.
+                property string submenus: "inline"
+                // Size of every menu, 0.5-2 (50-200 %), on top of the style.
+                property real scale: 1.0
+                // One object per menu the user arranged:
+                // { menu, order: [entry ids], bar: [entry ids], hidden: [entry ids] }.
+                // A menu without one uses its declared defaults.
+                property list<var> layouts: []
+                // User entries: { id, menu, symbol, title, command }. The command
+                // runs in bash with $II_CONTEXT_TARGET set to what was clicked.
+                property list<var> customEntries: []
             }
 
             property JsonObject regionSelector: JsonObject {
@@ -6323,9 +6950,14 @@ Singleton {
                 property bool enable: true
                 property bool enableGenius: true
                 property bool enableLrclib: true
+                property bool enableBetterlyrics: true
                 property bool enableYtmusic: true // requires ytmusicapi in venv
-                // "auto" | "lrclib" | "ytmusic" | "genius"
-                // auto = lrclib synced → lrclib plain → ytmusic → genius
+                // Free word-synced sources, asked only when BetterLyrics has no word timing.
+                property bool enableLrcmux: true
+                property bool enableNetease: true
+                // "auto" | "betterlyrics" | "lrcmux" | "netease" | "lrclib" | "ytmusic" | "genius"
+                // auto = word sync (betterlyrics → lrcmux → netease) → betterlyrics lines → lrclib synced
+                //        → lrclib plain → ytmusic → genius
                 property string lyricsProvider: "auto"
             }
 
@@ -6665,6 +7297,11 @@ Singleton {
                         property bool enable: true
                         property string sampleText: "The quick brown fox jumps over the lazy dog 0123456789"
                     }
+                    property JsonObject dictionary: JsonObject {
+                        property bool enable: true
+                        // ISO 639 code of the dictionary to search, or "auto" to follow the shell's language.
+                        property string language: "auto"
+                    }
                     property bool math: true
                     property bool webSearch: true
                     property bool shellCommand: true
@@ -6883,6 +7520,10 @@ Singleton {
                     property real accentStrength: 0.12
                     property bool showKeyHints: true
                     property bool showKeyHintBar: true
+                    // "classic": the original rows. "expressive": Material 3
+                    // Expressive rows — shape-backed icons that morph on
+                    // selection, title-face names, tonal selection.
+                    property string resultsStyle: "classic"
                     property int panelWidth: 860
                     property int panelBodyHeight: 420
                 }
@@ -7062,6 +7703,8 @@ Singleton {
 
                 property JsonObject quickToggles: JsonObject {
                     property string style: "android" // Options: classic, android
+                    // Android style only: the Material 3 Expressive faces, one design per tile size.
+                    property bool expressive: false
                     property bool useThreeWaySliders: true
                     property JsonObject classic: JsonObject {
                         // Order matters: it is the order the toggles appear in.

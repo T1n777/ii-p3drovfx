@@ -95,7 +95,7 @@ Singleton {
      * workspace it displays, or on a special workspace pulled over it.
      *
      * Built from the client list rather than a workspace's own `toplevels`, because the
-     * workspace compactor renumbers workspaces in place (`changeworkspaceid`) and those
+     * workspace arranger renumbers workspaces in place (`changeworkspaceid`) and those
      * lists never follow: the windows stay in the workspace object they were in while the
      * numbers move underneath them, so the workspace the user is standing on goes on
      * reporting a fullscreen window that left with its old number - and the bar, the
@@ -174,6 +174,25 @@ Singleton {
         updateMonitors();
         updateLayers();
         updateWorkspaces();
+    }
+
+    // The workspace arranger's renumberings still in flight: old id -> new id.
+    // Quickshell's workspace model and the window list both learn the new id
+    // from their own asynchronous refresh, a few ms apart and in either order,
+    // and in between a window and its workspace disagree. Compare ids with
+    // sameWorkspace() where that gap would flip a state (the window blur read
+    // "no windows" for one refresh and dropped and restarted, flashing the
+    // sharp wallpaper).
+    property var workspaceIdRenames: ({})
+    function sameWorkspace(a, b) {
+        const renames = root.workspaceIdRenames;
+        return a === b || renames[a] === b || renames[b] === a;
+    }
+    Timer {
+        id: workspaceIdRenamesExpiry
+        interval: 250
+        repeat: false
+        onTriggered: root.workspaceIdRenames = ({})
     }
 
     function biggestWindowForWorkspace(workspaceId) {
@@ -287,16 +306,28 @@ Singleton {
                     root.updateWorkspaces();
                     break;
 
-                // The workspace compactor renumbers workspaces in place instead of moving
+                // The workspace arranger renumbers workspaces in place instead of moving
                 // windows, so every client's workspace id changes without a single window event.
                 // Quickshell's own Hyprland model does not know this event either.
-                case "changeworkspaceid":
+                // Until both refreshes are in, the two ids name one workspace
+                // (workspaceIdRenames).
+                case "changeworkspaceid": {
+                    const ids = event.data.split(",");
+                    const fromId = parseInt(ids[0]);
+                    const toId = parseInt(ids[1]);
+                    if (!isNaN(fromId) && !isNaN(toId)) {
+                        const renames = Object.assign({}, root.workspaceIdRenames);
+                        renames[fromId] = toId;
+                        root.workspaceIdRenames = renames;
+                        workspaceIdRenamesExpiry.restart();
+                    }
                     Hyprland.refreshWorkspaces();
                     Hyprland.refreshMonitors();
                     root.updateMonitors();
                     root.updateWorkspaces();
                     root.updateWindowList();
                     break;
+                }
 
                 case "monitoradded":
                 case "monitorremoved":

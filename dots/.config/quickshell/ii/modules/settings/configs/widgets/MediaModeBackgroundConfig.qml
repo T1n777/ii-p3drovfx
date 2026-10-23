@@ -68,6 +68,29 @@ Item {
             }
 
             ConfigSwitch {
+                buttonIcon: "animated_images"
+                text: Translation.tr("Kinetic lyrics")
+                enabled: Config.options.background.mediaMode.immersive ?? false
+                checked: Config.options.background.mediaMode.kineticLyrics ?? false
+                onCheckedChanged: Config.options.background.mediaMode.kineticLyrics = checked
+                StyledToolTip {
+                    text: Translation.tr("Immersive design only. Sets word-synced lines (BetterLyrics, lrcmux, NetEase) as moving typography with a camera that follows each word. Songs without word timing keep the regular lyrics.")
+                }
+            }
+
+            ConfigSwitch {
+                buttonIcon: "camera"
+                text: Translation.tr("Kinetic lyrics fisheye lens")
+                enabled: (Config.options.background.mediaMode.immersive ?? false)
+                         && (Config.options.background.mediaMode.kineticLyrics ?? false)
+                checked: Config.options.background.mediaMode.kineticFisheye ?? false
+                onCheckedChanged: Config.options.background.mediaMode.kineticFisheye = checked
+                StyledToolTip {
+                    text: Translation.tr("Bends the kinetic lyrics through a wide lens: the middle swells and the edges curve away.")
+                }
+            }
+
+            ConfigSwitch {
                 buttonIcon: "lyrics"
                 text: Translation.tr("Show synchronized lyrics panel")
                 checked: Config.options.background.mediaMode.showLyrics ?? true
@@ -124,6 +147,16 @@ Item {
                             "displayName": Translation.tr("Radial"),
                             "icon": "blur_circular",
                             "value": 3
+                        },
+                        {
+                            "displayName": Translation.tr("Halo"),
+                            "icon": "fit_screen",
+                            "value": 4
+                        },
+                        {
+                            "displayName": Translation.tr("Spectrum"),
+                            "icon": "flare",
+                            "value": 5
                         }
                     ]
                 }
