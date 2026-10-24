@@ -66,6 +66,15 @@ var SETTLE_MS = {
     monitors: 1500
 };
 
+// How long a game trigger keeps counting once the game is gone, unless the
+// trigger sets `offSec`: long enough to survive a crash-restart or loading
+// into a launcher, and an alt-tab to a chat for "focused".
+function gameOffSec(t) {
+    if (t && t.offSec !== null && t.offSec !== undefined && isFinite(Number(t.offSec)))
+        return Math.max(0, Math.round(Number(t.offSec)));
+    return t && t.when === "focused" ? 5 : 30;
+}
+
 function settleMs(type) {
     return SETTLE_MS[type] ?? 0;
 }
@@ -74,8 +83,8 @@ function settleMs(type) {
 // restarting, a player between tracks, headphones reconnecting. A mode or
 // routine held by one of them waits the grace period (modes.graceSec) before
 // it ends. Everything else is clear-cut — a schedule, the charger, the lid —
-// and ends it at once. `game` is absent on purpose: GameDetector already
-// holds its verdict for a while after the game is gone.
+// and ends it at once. `game` is absent on purpose: its trigger has its own
+// delay (`offSec`, gameOffSec()).
 var GRACE_TYPES = {
     app: true,
     fullscreen: true,
@@ -190,6 +199,25 @@ var GAME_LAUNCHER_PATTERNS = [
     "^bedrock[- ]?on[- ]?linux",
     "^mcpelauncher",
     "^orion"
+];
+
+// Game stores / launchers whose own windows are not a game. steam.desktop is
+// categorised "Game" and Big Picture is fullscreen + GPU-heavy, so without this
+// merely opening Steam would count. Games themselves show up as steam_app_<id>
+// (or their own class), which none of these match. Skips the desktop-category
+// and GPU signals only; GAME_LAUNCHER_PATTERNS and the user's list still win.
+var GAME_CLIENT_PATTERNS = [
+    "^steam$",
+    "^steamwebhelper$",
+    "^steam-runtime",
+    "^steam_proton$"
+];
+
+// Emulator front-ends that are one window for both the library and the game.
+// Such a window is a client until its title says a game is loaded. Ryujinx:
+// idle "Ryujinx 1.3.3+hash", playing "Ryujinx 1.3.3+hash - Name (0100…16 hex) (64-bit)".
+var GAME_CLIENT_TITLE_RULES = [
+    { cls: "^ryujinx$", playing: " - .+ \\([0-9a-f]{16}\\) \\((32|64)-bit\\)$" }
 ];
 
 // The exact option set the Game Mode quick toggle writes
@@ -321,6 +349,8 @@ function normalizeTrigger(raw) {
         break;
     case "game":
         t.when = t.when === "focused" ? "focused" : "running";
+        // Seconds it keeps counting after the game is gone (null: the default).
+        t.offSec = optionalInt(t.offSec, 0, 3600);
         break;
     case "battery":
         t.below = optionalInt(t.below, 0, 100);
