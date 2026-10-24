@@ -936,6 +936,35 @@ Singleton {
         root.barIslands = next;
     }
 
+    // ── Bar autohide metrics & reveal coordination ────────────────────────────
+    property var barHiddenAmounts: ({})
+    property var barHiddenStates: ({})
+    function setBarHiddenMetrics(screenName, hiddenAmount, isHidden) {
+        if (!screenName)
+            return;
+        const prevAmount = root.barHiddenAmounts[screenName] ?? -1;
+        const prevState = root.barHiddenStates[screenName] ?? false;
+        if (prevAmount === hiddenAmount && prevState === isHidden)
+            return;
+        const nextAmounts = Object.assign({}, root.barHiddenAmounts);
+        nextAmounts[screenName] = hiddenAmount;
+        root.barHiddenAmounts = nextAmounts;
+
+        const nextStates = Object.assign({}, root.barHiddenStates);
+        nextStates[screenName] = isHidden;
+        root.barHiddenStates = nextStates;
+    }
+    function barHiddenAmountFor(screenName) {
+        return root.barHiddenAmounts[screenName] ?? 0;
+    }
+    function isBarHidden(screenName) {
+        return root.barHiddenStates[screenName] === true;
+    }
+
+    // Dynamic Island in bar center reveal sync
+    property bool islandInBarRevealed: false
+    property bool barInBarRevealed: false
+
     // The live docks, newest last: the Settings dock preview reads the first one's
     // model (`modelItems`) and helpers instead of deriving the dock's contents again.
     property var dockContents: []

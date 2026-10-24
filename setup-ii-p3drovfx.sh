@@ -181,6 +181,7 @@ BASE_INSTALLER_BRANCH="${PRESET_BRANCHES[end4]}"
 PROTECTED_PATTERNS=(
     ".env"
     "*.env"
+    ".protected"
     "user/generated/*.json"
     "scripts/hyprland/workspace_arranger"
     "scripts/hyprland/workspace_profile_manager"
@@ -1862,10 +1863,33 @@ carry_protected() {
         printf '0'
         return 0
     }
+    local -a patterns=("${PROTECTED_PATTERNS[@]}")
+    if [[ -f "$live/.protected" ]]; then
+        patterns+=(".protected")
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            line="${line#"${line%%[![:space:]]*}"}"
+            line="${line%"${line##*[![:space:]]}"}"
+            [[ -z "$line" || "$line" =~ ^# ]] && continue
+            patterns+=("$line")
+        done < "$live/.protected"
+    fi
+    local uignore="${XDG_CONFIG_HOME:-$HOME/.config}/illogical-impulse/updateignore"
+    if [[ -f "$uignore" ]]; then
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            line="${line#"${line%%[![:space:]]*}"}"
+            line="${line%"${line##*[![:space:]]}"}"
+            [[ -z "$line" || "$line" =~ ^# ]] && continue
+            line="${line#dots/.config/quickshell/ii/}"
+            line="${line#.config/quickshell/ii/}"
+            line="${line#quickshell/ii/}"
+            patterns+=("$line")
+        done < "$uignore"
+    fi
+
     # One walk of the live tree for every pattern, not one per pattern.
     local -a expr=()
     local pattern f rel
-    for pattern in "${PROTECTED_PATTERNS[@]}"; do
+    for pattern in "${patterns[@]}"; do
         ((${#expr[@]} > 0)) && expr+=(-o)
         expr+=(-path "$live/$pattern")
     done

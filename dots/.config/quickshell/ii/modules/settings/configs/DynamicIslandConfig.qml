@@ -166,7 +166,7 @@ Item {
                 Config.options.bar.barBackgroundStyle = 0;
             if (Config.options.appearance.fakeScreenRounding === 3 || Config.options.appearance.fakeScreenRounding === 4)
                 Config.options.appearance.fakeScreenRounding = 1;
-            Config.options.bar.autoHide.enable = false;
+            Config.options.bar.autoHide.enable = (Config.options.bar.floatingNotch.autoHide ?? false);
 
             // The centre belongs to the island: stash the user's
             // layout and empty the group. The old code only hid the
@@ -792,6 +792,9 @@ Item {
                         checked: Config.options.bar.floatingNotch.autoHide
                         onCheckedChanged: {
                             Config.options.bar.floatingNotch.autoHide = checked;
+                            if (Config.options.bar.floatingNotch.centerInBar) {
+                                Config.options.bar.autoHide.enable = checked;
+                            }
                         }
 
                         StyledToolTip {

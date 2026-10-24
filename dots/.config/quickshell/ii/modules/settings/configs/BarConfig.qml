@@ -36,11 +36,11 @@ Item {
     property string autoSwitchNoticeMessage: ""
     // The island hangs from the top edge of a horizontal bar: hiding the bar under it
     // leaves a floating island with nothing to retract into and stacks the reveal
-    // strip against the island's own hover region. Auto-hide is the island's setting
-    // (`floatingNotch.autoHide`), not the bar's, while this combination is on.
-    readonly property bool islandOwnsTopEdge: (barConfigRoot.bar.floatingNotch.enable
-        || barConfigRoot.bar.floatingNotch.centerInBar) && !barConfigRoot.bar.vertical
-    readonly property bool autoHideLocked: ShellModePolicy.barPositionLocked || barConfigRoot.islandOwnsTopEdge
+    // strip against the island's own hover region. CenterInBar now supports unified
+    // autohide with the bar, so it is no longer locked out.
+    readonly property bool islandOwnsTopEdge: barConfigRoot.bar.floatingNotch.enable
+        && !barConfigRoot.bar.floatingNotch.centerInBar && !barConfigRoot.bar.vertical
+    readonly property bool autoHideLocked: barConfigRoot.islandOwnsTopEdge
     readonly property bool tablet: Config.options.panelFamily === "tablet"
 
     readonly property var layouts: barConfigRoot.bar.layouts

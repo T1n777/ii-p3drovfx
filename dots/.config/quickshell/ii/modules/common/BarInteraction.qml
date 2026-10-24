@@ -46,7 +46,13 @@ Singleton {
         return stored;
     }
 
+    readonly property bool isIslandInBarCenter: ShellModePolicy.centerInBarActive
+        && ShellModePolicy.centerInBarStyleSupported
+
     // Hover-to-reveal auto-hide. A touch-first bar is always seated.
+    // When the Dynamic Island is centered in the bar, autohide applies if either
+    // the bar's autohide or the island's autohide is enabled.
     readonly property bool autoHide: !PanelFamily.touchFirst
-        && (Config.options?.bar?.autoHide?.enable ?? false)
+        && ((Config.options?.bar?.autoHide?.enable ?? false)
+            || (root.isIslandInBarCenter && (Config.options?.bar?.floatingNotch?.autoHide ?? false)))
 }

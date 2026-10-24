@@ -325,6 +325,7 @@ Item {
             && Config.options.bar.transparentGlow
             && GlobalStates.barOpen
             && !GlobalStates.lockLookActive
+            && !GlobalStates.isBarHidden(root.screenName)
         property real barBand: barBandShown ? 1 : 0
         Behavior on barBand {
             NumberAnimation { duration: 300; easing.type: Easing.OutCubic }

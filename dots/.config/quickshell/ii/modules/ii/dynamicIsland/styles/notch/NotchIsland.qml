@@ -544,7 +544,7 @@ Scope {
     IslandHoverIntent {
         id: hoverIntent
         // The island's own pointer only: a bubble expands itself, never the island.
-        hovered: containerHover.hovered && root.pointerOnBody
+        hovered: (containerHover.hovered || (maskTargetTopHover?.hovered ?? false)) && root.pointerOnBody
         blocked: root.explicitSurfaceActive || root.expandSuppressed || root.faceClosedUnderPointer
             // A face made of buttons: the pointer is there to press one.
             || IslandRegistry.isInteractive(root.pagedId)
@@ -1195,7 +1195,9 @@ Scope {
     /** Over a fullscreen window the island drops in for the OSD alone: no bubbles. */
     readonly property bool fullscreenOsdOnly: root.fullscreenHere && !root.hidden && root.pagedId === "osd"
 
-    readonly property bool autoHide: Config.options.bar.floatingNotch.autoHide ?? false
+    readonly property bool autoHide: (Config.options.bar.floatingNotch.autoHide ?? false)
+        || (root.centerInBar && BarInteraction.autoHide)
+    readonly property real barHiddenAmount: GlobalStates.barHiddenAmountFor(win.screen ? win.screen.name : "")
 
     // ── OLED saver ───────────────────────────────────────────────────────────
     /**
@@ -1227,12 +1229,21 @@ Scope {
         }
     }
     property bool edgeRevealed: false
+    readonly property bool localIslandRevealed: root.edgeRevealed || hoverIntent.hovered || root.hoverLinger
+        || root.eventRevealed || root.hasUrgentActivity || root.anyBubbleHovered || (root.expandedBubbleId !== "")
+        || root.searchActive || root.wallpaperActive || root.sessionActive || root.dashboardPinned || root.windowSwitcherActive
+        || root.askpassActive || (controller.sources.askpass && controller.sources.askpass.active)
+
+    onLocalIslandRevealedChanged: {
+        if (root.centerInBar) {
+            GlobalStates.islandInBarRevealed = localIslandRevealed;
+        }
+    }
 
     /**
      * Slid out of view.
      *
-     * In bar-centre mode the notch never slides: it grows and shrinks in place, because
-     * anything that leaves the bar's centre empty for a frame shows a hole in the bar.
+     * In bar-centre mode with auto-hide, the island slides up and down in lockstep with the bar.
      */
     readonly property bool hidden: {
         // Alt+Tab included: over a fullscreen window and under auto-hide alike, the
@@ -1265,7 +1276,8 @@ Scope {
             return !root.edgeRevealed && !hoverIntent.hovered && !root.hoverLinger
                 && !root.eventRevealed && !root.hasUrgentActivity
                 // Bubbles hang from the island: it stays while one is being read.
-                && !root.anyBubbleHovered && root.expandedBubbleId === "";
+                && !root.anyBubbleHovered && root.expandedBubbleId === ""
+                && !(root.centerInBar && GlobalStates.barInBarRevealed);
         if (root.centerInBar)
             return false;
         // Without auto-hide only the resting face hides, so the island is not a
@@ -1357,6 +1369,7 @@ Scope {
      * A short linger after the pointer leaves. Hiding the instant it left made the
      * island vanish under a pointer that had only drifted off its edge.
      */
+    readonly property int effectiveHideDelay: Config?.options.bar.autoHide.hideDelay ?? 80
     property bool hoverLinger: false
     Connections {
         target: hoverIntent
@@ -1366,8 +1379,13 @@ Scope {
             // an OSD still on screen does not silence the island's own hover.
             if (!hoverIntent.hovered && !root.explicitSurfaceActive)
                 root.expandSuppressed = false;
-            if (!hoverIntent.hovered)
+            if (!hoverIntent.hovered) {
                 root.faceClosedUnderPointer = false;
+                if (root.centerInBar && BarInteraction.autoHide) {
+                    root.eventRevealed = false;
+                    eventRevealTimer.stop();
+                }
+            }
             if (hoverIntent.hovered) {
                 hoverLingerTimer.stop();
                 root.hoverLinger = true;
@@ -1376,15 +1394,36 @@ Scope {
             }
         }
     }
+
+    Connections {
+        target: GlobalStates
+        function onBarInBarRevealedChanged() {
+            if (root.centerInBar && BarInteraction.autoHide && !GlobalStates.barInBarRevealed) {
+                if (!hoverIntent.hovered && !edgeHover.hovered && !root.anyBubbleHovered) {
+                    root.eventRevealed = false;
+                    eventRevealTimer.stop();
+                    hoverLingerTimer.stop();
+                    edgeHideTimer.stop();
+                    root.hoverLinger = false;
+                    root.edgeRevealed = false;
+                }
+            }
+        }
+    }
+
     property Timer hoverLingerTimer: Timer {
         id: hoverLingerTimer
-        interval: IslandPolicy.collapseGraceMs
+        interval: (root.centerInBar && BarInteraction.autoHide)
+            ? Math.max(80, root.effectiveHideDelay)
+            : IslandPolicy.collapseGraceMs
         repeat: false
         onTriggered: root.hoverLinger = false
     }
 
     property Timer edgeHideTimer: Timer {
-        interval: IslandPolicy.collapseGraceMs
+        interval: (root.centerInBar && BarInteraction.autoHide)
+            ? Math.max(80, root.effectiveHideDelay)
+            : IslandPolicy.collapseGraceMs
         repeat: false
         onTriggered: root.edgeRevealed = false
     }
@@ -1852,7 +1891,7 @@ Scope {
 
     readonly property int centerBarOpenMs: Math.round(450 * Appearance.animMultiplier)
     readonly property int centerBarCloseMs: Math.round(280 * Appearance.animMultiplier)
-    property real centerBarProgress: (root.centerInBar && !root.hidden) ? 1.0 : 0.0
+    property real centerBarProgress: (root.centerInBar && (!root.hidden || BarInteraction.autoHide)) ? 1.0 : 0.0
     Behavior on centerBarProgress {
         enabled: root.centerInBar
         NumberAnimation {
@@ -1961,7 +2000,7 @@ Scope {
         mask: Region {
             item: {
                 if (root.hidden)
-                    return edgeSensor;
+                    return root.centerInBar ? null : edgeSensor;
                 // A grid that hangs outside the body needs the whole surface to accept
                 // input; the integrated one is inside the island's own shape, which
                 // maskTarget already covers.
@@ -2102,9 +2141,14 @@ Scope {
         Item {
             id: maskTarget
             anchors.horizontalCenter: container.horizontalCenter
-            anchors.top: container.top
+            anchors.top: root.centerInBar ? parent.top : container.top
             width: container.width
-            height: container.height
+            height: root.centerInBar ? Math.max(0, container.y + container.height) : container.height
+
+            HoverHandler {
+                id: maskTargetTopHover
+                enabled: root.centerInBar && !root.hidden
+            }
         }
 
         // ── Auxiliary bubbles: the shapes, beneath the body ──────────────────
@@ -2284,8 +2328,8 @@ Scope {
              * with the height, the size animates once and the reveal scales the result.
              */
             property real animatedWidth: root.targetWidth + 2 * root.filletSize
-            // The pill keeps its size and slides instead (see `y`).
-            width: (root.centerInBar && !root.pillShape) ? root.centerBarProgress * container.animatedWidth : container.animatedWidth
+            // When the bar autohides, the island slides with the bar; width is not collapsed.
+            width: (root.centerInBar && !BarInteraction.autoHide && !root.pillShape) ? root.centerBarProgress * container.animatedWidth : container.animatedWidth
             /**
              * The size animates once, and the bar-centre reveal scales that result.
              *
@@ -2294,7 +2338,7 @@ Scope {
              * was already moving every frame, so hiding lagged and settled late.
              */
             property real animatedHeight: root.targetHeight
-            height: (root.centerInBar && !root.pillShape) ? root.centerBarProgress * container.animatedHeight : container.animatedHeight
+            height: (root.centerInBar && !BarInteraction.autoHide && !root.pillShape) ? root.centerBarProgress * container.animatedHeight : container.animatedHeight
 
             y: {
                 if (root.pillShape) {
@@ -2306,11 +2350,15 @@ Scope {
                     else if (root.usingWrappedFrame)
                         shown += Config.options.appearance.wrappedFrameThickness;
                     const away = -container.height - 10;
-                    // In the bar centre the slide rides the reveal clock the bar already
-                    // follows; floating, the y Behavior below animates it.
                     if (root.centerInBar)
-                        return away + (shown - away) * root.centerBarProgress;
+                        return shown - root.barHiddenAmount;
                     return root.hidden ? away : shown;
+                }
+                if (root.centerInBar) {
+                    let shown = 0;
+                    if (root.usingWrappedFrame)
+                        shown += Config.options.appearance.wrappedFrameThickness;
+                    return shown - root.barHiddenAmount;
                 }
                 if (root.hidden && !root.centerInBar)
                     return -root.targetHeight - 10;
@@ -2847,12 +2895,12 @@ Scope {
             id: edgeSensor
             // A sliver along the top edge. In the bar centre the gap closes while the
             // island is hidden, so anything taller would sit over the bar's own widgets.
-            width: 160
-            height: 4
+            width: Math.max(160, container.width)
+            height: Math.max(1, Config.options.bar.autoHide.hoverRegionWidth ?? 7)
             color: "transparent"
             anchors.top: parent.top
             anchors.horizontalCenter: parent.horizontalCenter
-            visible: root.hidden
+            visible: root.hidden && !root.centerInBar
 
             HoverHandler {
                 id: edgeHover

@@ -1,0 +1,14 @@
+# Dynamic Island overlay autohide protection
+GlobalStates.qml
+modules/common/BarInteraction.qml
+modules/common/Config.qml
+modules/ii/bar/core/BarWindow.qml
+modules/ii/dynamicIsland/styles/notch/NotchIsland.qml
+modules/ii/background/blur/BarGradientOverlay.qml
+modules/ii/background/BackgroundRoot.qml
+modules/ii/background/depth/DepthCutoutLayer.qml
+modules/settings/configs/BarConfig.qml
+modules/settings/configs/DynamicIslandConfig.qml
+modules/settings/configs/sections/BarBehaviorSection.qml
+modules/settings/configs/sections/BarPlacementSection.qml
+modules/settings/configs/sections/DynamicIslandModeSection.qml

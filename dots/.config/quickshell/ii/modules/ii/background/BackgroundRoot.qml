@@ -829,6 +829,7 @@ PanelWindow {
         // transparent-bar fade must remain anchored below the real bar. Sampling
         // WallpaperImage keeps the blur in sync with its rendered wallpaper.
         BarGradientOverlay {
+            screenName: bgRoot.screen ? bgRoot.screen.name : ""
             sourceItem: wallpaperImage
             screenWidth: bgRoot.screen.width
             screenHeight: bgRoot.screen.height

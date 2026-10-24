@@ -14,18 +14,30 @@ Item {
     required property var sourceItem
     required property int screenWidth
     required property int screenHeight
+    property string screenName: ""
+
+    readonly property real barHiddenAmount: screenName !== ""
+        ? GlobalStates.barHiddenAmountFor(screenName)
+        : (Quickshell.screens.length > 0 ? GlobalStates.barHiddenAmountFor(Quickshell.screens[0].name) : 0)
+
+    readonly property bool isBarHidden: screenName !== ""
+        ? GlobalStates.isBarHidden(screenName)
+        : (Quickshell.screens.length > 0 ? GlobalStates.isBarHidden(Quickshell.screens[0].name) : false)
+
+    readonly property real barHiddenProgress: Math.min(1.0, Math.max(0.0, barHiddenAmount / Math.max(1, Appearance.sizes.barHeight)))
 
     readonly property bool shouldShow: Config.options.bar.barBackgroundStyle === 0
         && Config.options.bar.transparentGlow
         && GlobalStates.barOpen
         && !GlobalStates.lockLookActive
+        && !isBarHidden
 
     Item {
         id: barBlurOverlay
         anchors.fill: parent
 
         visible: opacity > 0.001
-        opacity: barOverlayRoot.shouldShow ? 1.0 : 0.0
+        opacity: (barOverlayRoot.shouldShow ? 1.0 : 0.0) * (1.0 - barOverlayRoot.barHiddenProgress)
         Behavior on opacity {
             NumberAnimation { duration: 300; easing.type: Easing.OutCubic }
         }
@@ -138,7 +150,7 @@ Item {
         anchors.fill: parent
 
         visible: opacity > 0.001
-        opacity: barOverlayRoot.shouldShow ? 1.0 : 0.0
+        opacity: (barOverlayRoot.shouldShow ? 1.0 : 0.0) * (1.0 - barOverlayRoot.barHiddenProgress)
         Behavior on opacity {
             NumberAnimation { duration: 300; easing.type: Easing.OutCubic }
         }

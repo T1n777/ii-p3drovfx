@@ -8,14 +8,22 @@ ContentSection {
     icon: "tune"
     title: Translation.tr("Behavior")
 
+    readonly property bool islandOwnsTopEdge: Config.options.bar.floatingNotch.enable
+        && !Config.options.bar.floatingNotch.centerInBar && !Config.options.bar.vertical
+
     ConfigSwitch {
         buttonIcon: "visibility_off"
         text: Translation.tr("Automatically hide")
         checked: Config.options.bar.autoHide.enable
-        enabled: !ShellModePolicy.barPositionLocked
-        onCheckedChanged: Config.options.bar.autoHide.enable = checked
+        enabled: !islandOwnsTopEdge
+        onCheckedChanged: {
+            Config.options.bar.autoHide.enable = checked;
+            if (Config.options.bar.floatingNotch.centerInBar) {
+                Config.options.bar.floatingNotch.autoHide = checked;
+            }
+        }
         StyledToolTip {
-            text: ShellModePolicy.barPositionLocked ? Translation.tr("Auto-hide is locked while 'Dynamic Island in bar center' is active.") : Translation.tr("Automatically hide the bar when not in use")
+            text: islandOwnsTopEdge ? Translation.tr("Auto-hide is locked while floating island hangs over the bar.") : Translation.tr("Automatically hide the bar when not in use")
         }
     }
 
@@ -100,6 +108,22 @@ ContentSection {
         }
         StyledToolTip {
             text: Translation.tr("Delay in milliseconds the pointer must stay on the edge before the bar reveals")
+        }
+    }
+
+    ConfigSpinBox {
+        visible: Config.options.bar.autoHide.enable
+        icon: "timer"
+        text: Translation.tr("Hide delay (ms)")
+        value: Config.options.bar.autoHide.hideDelay ?? 80
+        from: 0
+        to: 1000
+        stepSize: 25
+        onValueChanged: {
+            Config.options.bar.autoHide.hideDelay = value;
+        }
+        StyledToolTip {
+            text: Translation.tr("Delay in milliseconds before the bar hides after the pointer leaves")
         }
     }
 

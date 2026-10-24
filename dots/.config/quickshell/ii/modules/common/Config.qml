@@ -5084,6 +5084,7 @@ Singleton {
                     property string mode: "instant" // "instant" | "dwell" | "wide" | "cautious"
                     property int hoverRegionWidth: 2
                     property int hoverDelay: 0
+                    property int hideDelay: 80
                     property bool pushWindows: false
                     property JsonObject showWhenPressingSuper: JsonObject {
                         property bool enable: true

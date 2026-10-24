@@ -101,6 +101,23 @@ Scope {
             Component.onDestruction: GlobalStates.setBarIsland(islandPublisher.screenName, "", 0, 0)
         }
 
+        // Publishes autohide metrics to GlobalStates so wallpaper gradient overlay and dynamic island sync
+        QtObject {
+            id: autohidePublisher
+            readonly property string screenName: root.screen ? root.screen.name : ""
+            readonly property real hiddenAmount: barRoot.hiddenAmount
+            readonly property bool isHidden: barRoot.hiddenAmount >= Appearance.sizes.barHeight - 0.5 && BarInteraction.autoHide
+
+            function publish() {
+                GlobalStates.setBarHiddenMetrics(autohidePublisher.screenName, autohidePublisher.hiddenAmount, autohidePublisher.isHidden);
+            }
+
+            onHiddenAmountChanged: publish()
+            onIsHiddenChanged: publish()
+            Component.onCompleted: publish()
+            Component.onDestruction: GlobalStates.setBarHiddenMetrics(autohidePublisher.screenName, 0, false)
+        }
+
         // ── Window tracking (for showBarBackground) ──────────────────────────
         Connections {
             enabled: Config.options.bar.barBackgroundStyle === 2 || (Config.options.bar.barBackgroundStyle === 3 && (BarInteraction.cornerStyle === 0 || BarInteraction.cornerStyle === 1))
@@ -168,6 +185,7 @@ Scope {
         // ── Hover delay trigger ───────────────────────────────────────────────
         property bool hoverTriggered: false
         readonly property int hoverDelay: Config?.options.bar.autoHide.hoverDelay ?? 0
+        readonly property int hideDelay: Config?.options.bar.autoHide.hideDelay ?? 80
 
         Timer {
             id: hoverOpenTimer
@@ -176,10 +194,18 @@ Scope {
             onTriggered: barRoot.hoverTriggered = true
         }
 
+        Timer {
+            id: hoverCloseTimer
+            interval: Math.max(80, barRoot.hideDelay)
+            repeat: false
+            onTriggered: barRoot.hoverTriggered = false
+        }
+
         Connections {
             target: hoverRegion
             function onContainsMouseChanged() {
                 if (hoverRegion.containsMouse) {
+                    hoverCloseTimer.stop();
                     if (barRoot.hoverDelay <= 0 || barRoot.hiddenAmount < 1 || barRoot.superShow || GlobalStates.sidebarLeftOpen || GlobalStates.sidebarRightOpen) {
                         barRoot.hoverTriggered = true;
                     } else {
@@ -187,13 +213,19 @@ Scope {
                     }
                 } else {
                     hoverOpenTimer.stop();
-                    barRoot.hoverTriggered = false;
+                    hoverCloseTimer.restart();
                 }
             }
         }
 
         property bool superShow: false
-        property bool mustShow: hoverTriggered || superShow || GlobalStates.sidebarLeftOpen || GlobalStates.sidebarRightOpen || GlobalStates.editMode || GlobalStates.anyBarPopupOpen
+        readonly property bool localBarRevealed: hoverTriggered || superShow || GlobalStates.sidebarLeftOpen || GlobalStates.sidebarRightOpen || GlobalStates.editMode || GlobalStates.anyBarPopupOpen
+        onLocalBarRevealedChanged: {
+            if (BarInteraction.isIslandInBarCenter) {
+                GlobalStates.barInBarRevealed = localBarRevealed;
+            }
+        }
+        property bool mustShow: localBarRevealed || (BarInteraction.isIslandInBarCenter && GlobalStates.islandInBarRevealed)
         // BarInteraction, not the stored flag: a touch-first family forces auto-hide off
         // without rewriting the preference the user has saved.
         property real hiddenAmount: (BarInteraction.autoHide && !mustShow) ? Appearance.sizes.barHeight : 0
@@ -292,8 +324,8 @@ Scope {
             Item {
                 id: hoverMaskRegion
                 readonly property real shadowExtend: 0
-                readonly property real bottomMaskExtend: BarInteraction.autoHide ? Math.max(Config.options.bar.autoHide.hoverRegionWidth, shadowExtend) : shadowExtend
-                readonly property real topMaskExtend: BarInteraction.autoHide ? Math.max(Config.options.bar.autoHide.hoverRegionWidth, shadowExtend) : shadowExtend
+                readonly property real bottomMaskExtend: BarInteraction.autoHide ? Math.max(Config.options.bar.autoHide.hoverRegionWidth ?? 7, 1) : shadowExtend
+                readonly property real topMaskExtend: BarInteraction.autoHide ? Math.max(Config.options.bar.autoHide.hoverRegionWidth ?? 7, 1) : shadowExtend
                 anchors {
                     fill: barContent
                     topMargin: -topMaskExtend - (barContent.verticalTopOffset ?? 0)
