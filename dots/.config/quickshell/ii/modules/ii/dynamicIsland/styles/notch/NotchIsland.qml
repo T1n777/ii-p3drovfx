@@ -44,12 +44,20 @@ Scope {
     }
 
     /**
+     * When Escape is pressed while the island is expanded, preferClockFace forces
+     * the island to collapse immediately to the contracted resting time-only face.
+     */
+    property bool preferClockFace: false
+
+    /**
      * The activity on screen.
      *
      * Normally whatever the controller put in the centre, but a manual page turn wins
      * until the user stops paging - otherwise the wheel would fight the arbitration.
      */
     readonly property string pagedId: {
+        if (root.preferClockFace)
+            return "clock";
         // An auto-hiding island only appears because something happened, so while that
         // reveal lasts it shows the thing that happened - pressing play shows the track
         // even when arbitration would otherwise keep an agent in the centre. It keeps that
@@ -166,7 +174,7 @@ Scope {
      * The clock and the empty island have no expanded view of their own, so expanding
      * them opens the dashboard instead. Search always wins over it.
      */
-    readonly property bool restingFace: root.pagedId === "" || root.pagedId === "clock"
+    readonly property bool restingFace: root.preferClockFace || root.pagedId === "" || root.pagedId === "clock"
     /**
      * The dashboard, asked for from outside the island - `qs ipc call dynamicIsland
      * openDashboard`, or anything else that wants it on screen with no pointer on it.
@@ -237,6 +245,12 @@ Scope {
     IpcHandler {
         target: "dynamicIsland"
 
+        function collapseToClock(): void {
+            root.collapseToClock();
+        }
+        function collapse(): void {
+            root.collapseToClock();
+        }
         function openDashboard(): void {
             root.openDashboard();
         }
@@ -380,6 +394,28 @@ Scope {
 
     function yieldToSearch() {
         root.forceCollapse();
+    }
+
+    /**
+     * Collapses the island from any expanded view (dashboard, expanded card, bubble,
+     * wallpaper, session) back to the contracted resting time-only face (clock).
+     * Suppresses re-expansion and hides side widgets until the pointer leaves.
+     */
+    function collapseToClock() {
+        root.preferClockFace = true;
+        root.expandSuppressed = true;
+        root.forceCollapse();
+        root.dismissDashboard();
+        root.expandedBubbleId = "";
+        if (controller.sources.session && typeof controller.sources.session.close === "function")
+            controller.sources.session.close();
+        if (controller.sources.wallpaper && typeof controller.sources.wallpaper.close === "function")
+            controller.sources.wallpaper.close();
+        if (controller.sources.search && typeof controller.sources.search.close === "function")
+            controller.sources.search.close();
+        if (root.centerInBar && BarInteraction.autoHide) {
+            root.edgeRevealed = root.islandShellHovered;
+        }
     }
 
     /**
@@ -1240,6 +1276,7 @@ Scope {
         || root.eventRevealed || root.hasUrgentActivity || root.anyBubbleHovered || (root.expandedBubbleId !== "")
         || root.searchActive || root.wallpaperActive || root.sessionActive || root.dashboardPinned || root.windowSwitcherActive
         || root.askpassActive || (controller.sources.askpass && controller.sources.askpass.active)
+        || (root.preferClockFace && root.islandShellHovered)
 
     onLocalIslandRevealedChanged: {
         if (root.centerInBar) {
@@ -1387,8 +1424,10 @@ Scope {
             // The suppression from an interrupt or search takeover ends once the pointer
             // leaves; only the explicit surfaces keep it past that, so a notification or
             // an OSD still on screen does not silence the island's own hover.
-            if (!hoverIntent.hovered && !root.explicitSurfaceActive)
+            if (!hoverIntent.hovered && !root.explicitSurfaceActive) {
                 root.expandSuppressed = false;
+                root.preferClockFace = false;
+            }
             if (!hoverIntent.hovered) {
                 root.faceClosedUnderPointer = false;
                 if (root.centerInBar && BarInteraction.autoHide) {
@@ -1407,9 +1446,13 @@ Scope {
 
     Connections {
         target: GlobalStates
+        function onCollapseIslandRequested() {
+            root.collapseToClock();
+        }
         function onTopShellRevealedChanged() {
             if (root.centerInBar && BarInteraction.autoHide && !GlobalStates.topShellRevealed && !GlobalStates.barInBarRevealed) {
                 if (!hoverIntent.hovered && !edgeHover.hovered && !root.anyBubbleHovered && !(maskTargetTopHover?.hovered ?? false)) {
+                    root.preferClockFace = false;
                     root.eventRevealed = false;
                     eventRevealTimer.stop();
                     hoverLingerTimer.stop();
@@ -1422,6 +1465,7 @@ Scope {
         function onBarInBarRevealedChanged() {
             if (root.centerInBar && BarInteraction.autoHide && !GlobalStates.barInBarRevealed && !GlobalStates.topShellRevealed) {
                 if (!hoverIntent.hovered && !edgeHover.hovered && !root.anyBubbleHovered && !(maskTargetTopHover?.hovered ?? false)) {
+                    root.preferClockFace = false;
                     root.eventRevealed = false;
                     eventRevealTimer.stop();
                     hoverLingerTimer.stop();
@@ -2010,8 +2054,16 @@ Scope {
         // never appeared at all. Every face that types asks OnDemand instead, and a
         // change of face is the change Hyprland grants on.
         WlrLayershell.keyboardFocus: (root.wallpaperActive || root.searchActive || root.sessionActive
-                || root.askpassActive || notchContent.dashboardWantsKeyboard) && !root.keyboardNudge
+                || root.askpassActive || notchContent.dashboardWantsKeyboard
+                || root.expanded || root.dashboardActive || root.expandedBubbleId !== "") && !root.keyboardNudge
             ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
+
+        Shortcut {
+            sequences: ["Escape"]
+            enabled: root.expanded || root.dashboardActive || root.expandedBubbleId !== ""
+                || root.wallpaperActive || root.sessionActive || root.searchActive
+            onActivated: root.collapseToClock()
+        }
 
         anchors {
             top: true
@@ -2814,7 +2866,7 @@ Scope {
                     // the island; see NotchContent.contractedWidth.
                     contractedWidth: root.contractedWidth
                     contractedHeight: root.contractedHeight
-                    sideIds: root.sideBound
+                    sideIds: root.preferClockFace ? [] : root.sideBound
                     restingHeight: root.restingHeight
                     screenWidth: win.screen ? win.screen.width : 1920
                     dashboardAvailableWidth: root.widthCap

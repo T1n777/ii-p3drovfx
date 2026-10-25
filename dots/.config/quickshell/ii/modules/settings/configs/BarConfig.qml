@@ -289,10 +289,15 @@ Item {
                     text: Translation.tr("Automatically hide")
                     checked: barConfigRoot.bar.autoHide.enable
                     enabled: !barConfigRoot.autoHideLocked
-                    onCheckedChanged: Config.options.bar.autoHide.enable = checked
+                    onCheckedChanged: {
+                        Config.options.bar.autoHide.enable = checked;
+                        if (Config.options.bar.floatingNotch.centerInBar) {
+                            Config.options.bar.floatingNotch.autoHide = checked;
+                        }
+                    }
                     StyledToolTip {
                         text: barConfigRoot.autoHideLocked
-                            ? Translation.tr("Auto-hide is locked while the Dynamic Island is active on a horizontal bar; the island has its own auto-hide.")
+                            ? Translation.tr("Auto-hide is locked while floating island hangs over the bar.")
                             : Translation.tr("Automatically hide the bar when not in use")
                     }
                 }
@@ -351,6 +356,35 @@ Item {
                     onValueChanged: Config.options.bar.autoHide.hoverDelay = value
                     StyledToolTip {
                         text: Translation.tr("Delay in milliseconds the pointer must stay on the edge before the bar reveals")
+                    }
+                }
+            }
+
+            BarPair {
+                id: pair3
+                Layout.topMargin: 4
+                visible: barConfigRoot.bar.autoHide.enable
+                ConfigSpinBox {
+                    groupHorizontal: pair3.horizontal
+                    icon: "timer"
+                    text: Translation.tr("Hide delay (ms)")
+                    from: 0
+                    to: 1000
+                    stepSize: 25
+                    value: barConfigRoot.bar.autoHide.hideDelay ?? 80
+                    onValueChanged: Config.options.bar.autoHide.hideDelay = value
+                    StyledToolTip {
+                        text: Translation.tr("Delay in milliseconds before the bar hides after the pointer leaves")
+                    }
+                }
+                ConfigSwitch {
+                    groupHorizontal: pair3.horizontal
+                    buttonIcon: "layers"
+                    text: Translation.tr("Push windows")
+                    checked: barConfigRoot.bar.autoHide.pushWindows ?? true
+                    onCheckedChanged: Config.options.bar.autoHide.pushWindows = checked
+                    StyledToolTip {
+                        text: Translation.tr("When enabled, windows resize to make space for the bar. When disabled, the bar overlays on top of windows.")
                     }
                 }
             }

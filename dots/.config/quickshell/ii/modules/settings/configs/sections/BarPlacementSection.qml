@@ -313,6 +313,17 @@ ColumnLayout {
                 }
             }
 
+            ConfigSwitch {
+                visible: Config.options.bar.autoHide.enable
+                buttonIcon: "layers"
+                text: Translation.tr("Push windows when revealed")
+                checked: Config.options.bar.autoHide.pushWindows ?? true
+                onCheckedChanged: Config.options.bar.autoHide.pushWindows = checked
+                StyledToolTip {
+                    text: Translation.tr("When enabled, windows resize to make space for the revealed bar. When disabled, the bar overlays smoothly on top of windows.")
+                }
+            }
+
 
         }
     }

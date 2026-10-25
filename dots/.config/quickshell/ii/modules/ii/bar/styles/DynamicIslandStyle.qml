@@ -22,6 +22,7 @@ Item {
     Keys.onPressed: event => {
         if (event.key === Qt.Key_Escape) {
             GlobalStates.overviewOpen = false;
+            GlobalStates.collapseDynamicIsland();
             event.accepted = true;
             return;
         }

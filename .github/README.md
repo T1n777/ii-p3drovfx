@@ -196,7 +196,7 @@ The left sidebar holds an **AI chat** for cloud and local models, a **Translator
     <td width="50%"><img src="assets/readme/search.gif" width="100%" alt="Search evaluating math and conversions" /></td>
   </tr>
   <tr>
-    <td align="center"><b>Dynamic Island</b><br><sub>Media, activities and OSDs live in the notch. Hover it to open the dashboard.</sub></td>
+    <td align="center"><b>Dynamic Island</b><br><sub>Media, activities and OSDs live in the notch. Hover it to open the dashboard. Press <b>Esc</b> while expanded to collapse directly to the resting time-only face.</sub></td>
     <td align="center"><b>Search</b><br><sub>Apps, math, unit and currency conversion, commands and AI, with no prefixes.</sub></td>
   </tr>
   <tr>
@@ -204,10 +204,22 @@ The left sidebar holds an **AI chat** for cloud and local models, a **Translator
     <td width="50%"><img src="assets/readme/livedraw.gif" width="100%" alt="Drawing on top of the screen with Live Draw" /></td>
   </tr>
   <tr>
-    <td align="center"><b>Settings</b><br><sub>Every page previews the real component as you change it.</sub></td>
+    <td align="center"><b>Settings</b><br><sub>Every page previews the real component as you change it. Configure autohide sensitivity, window overlay vs push mode, and keyboard shortcuts.</sub></td>
     <td align="center"><b>Live Draw</b><br><sub>Annotate anything on screen, spotlight and zoom, then save or copy it.</sub></td>
   </tr>
 </table>
+
+## Enhanced Dynamic Island & Autohide Architecture
+
+This fork features a rebuilt top-shell autohide engine and enhanced keyboard interactions:
+
+- **Escape (`Esc`) to Collapse**: Pressing `Escape` while the island or dashboard is expanded collapses it immediately to the contracted resting time-only clock face, suppressing re-expansion until the pointer leaves.
+- **Top Shell Autohide Coordination**: A centralized hover bus debounces reveals and retractions, eliminating top-edge jitter and window shaking.
+- **Window Overlay Mode**: Toggle `pushWindows` in Settings (`Bar → Behavior`) to let the bar and island overlay smoothly above windows without resizing or pushing desktop tiles.
+- **Accurate Top Edge Sensor**: Handover logic ensures that hidden masks never interfere with browser tabs or top window controls.
+- **Notification App Icon Sanitization**: Fixes raw file paths sprawling across notification popups.
+
+For full technical specifications and implementation details, see [**CHANGES.md**](../CHANGES.md).
 
 ## Credits
 

@@ -1051,6 +1051,12 @@ Singleton {
         }
     }
 
+    // Dynamic Island Escape / collapse coordination
+    signal collapseIslandRequested()
+    function collapseDynamicIsland(): void {
+        collapseIslandRequested();
+    }
+
     // The live docks, newest last: the Settings dock preview reads the first one's
     // model (`modelItems`) and helpers instead of deriving the dock's contents again.
     property var dockContents: []
