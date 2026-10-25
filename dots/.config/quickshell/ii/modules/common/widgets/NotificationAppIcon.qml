@@ -8,6 +8,7 @@ import Quickshell.Services.Notifications
 
 MaterialShape { // App icon
     id: root
+    clip: true
     property string appIcon: ""
     property string summary: ""
     property var urgency: NotificationUrgency.Normal
@@ -23,7 +24,18 @@ MaterialShape { // App icon
     // image://icon/<name>. Shell senders pass Material Symbol names there, which no icon
     // theme has, so draw those as a glyph instead of the missing-icon checkerboard.
     readonly property string themedImageName: image.startsWith("image://icon/") ? image.slice(13).split("?")[0] : ""
-    readonly property bool imageIsGlyph: themedImageName !== "" && Quickshell.iconPath(themedImageName, true) === ""
+    // Material Symbol names are short lowercase identifiers (e.g. "coffee", "dns", "wifi").
+    // File paths (/tmp/..., .png), URLs, or names with punctuation/slashes must NEVER be treated as glyphs.
+    readonly property bool imageIsGlyph: {
+        if (!themedImageName || themedImageName.length > 40)
+            return false;
+        if (themedImageName.indexOf("/") !== -1 || themedImageName.indexOf("\\") !== -1 ||
+            themedImageName.indexOf(".") !== -1 || themedImageName.indexOf(":") !== -1)
+            return false;
+        if (!/^[a-z0-9_]+$/.test(themedImageName))
+            return false;
+        return Quickshell.iconPath(themedImageName, true) === "";
+    }
 
     implicitSize: 38 * scale
     property list<var> urgentShapes: [MaterialShape.Shape.VerySunny, MaterialShape.Shape.SoftBurst,]
@@ -32,7 +44,7 @@ MaterialShape { // App icon
     color: isUrgent ? Appearance.colors.colPrimaryContainer : Appearance.colors.colSecondaryContainer
     Loader {
         id: materialSymbolLoader
-        active: (root.appIcon == "" && root.image == "") || root.imageIsGlyph
+        active: (root.appIcon == "" && root.image == "") || root.imageIsGlyph || (notifImageLoader.active && (!notifImageLoader.item || !notifImageLoader.item.imageReady))
         anchors.fill: parent
         sourceComponent: MaterialSymbol {
             text: {
@@ -47,6 +59,7 @@ MaterialShape { // App icon
             iconSize: root.materialIconSize
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
+            clip: true
         }
     }
     Loader {
@@ -65,7 +78,10 @@ MaterialShape { // App icon
         active: root.image != "" && !root.imageIsGlyph
         anchors.fill: parent
         sourceComponent: Item {
+            id: notifItem
             anchors.fill: parent
+            readonly property bool imageReady: notifImage.status === Image.Ready
+
             StyledImage {
                 id: notifImage
                 anchors.fill: parent
@@ -89,7 +105,7 @@ MaterialShape { // App icon
                 sourceComponent: IconImage {
                     implicitSize: root.smallAppIconSize
                     asynchronous: false
-                    source: Quickshell.iconPath(root.appIcon, "image-missing")
+                    source: Quickshell.iconPath(root.appIcon, "")
                 }
             }
         }
