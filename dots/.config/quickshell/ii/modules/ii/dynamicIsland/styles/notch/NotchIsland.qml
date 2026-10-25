@@ -1229,6 +1229,13 @@ Scope {
         }
     }
     property bool edgeRevealed: false
+    readonly property bool islandShellHovered: hoverIntent.hovered || root.anyBubbleHovered || (maskTargetTopHover?.hovered ?? false)
+    onIslandShellHoveredChanged: {
+        if (root.centerInBar) {
+            GlobalStates.reportTopShellHover("island_" + (win.screen ? win.screen.name : ""), islandShellHovered);
+        }
+    }
+
     readonly property bool localIslandRevealed: root.edgeRevealed || hoverIntent.hovered || root.hoverLinger
         || root.eventRevealed || root.hasUrgentActivity || root.anyBubbleHovered || (root.expandedBubbleId !== "")
         || root.searchActive || root.wallpaperActive || root.sessionActive || root.dashboardPinned || root.windowSwitcherActive
@@ -1237,6 +1244,9 @@ Scope {
     onLocalIslandRevealedChanged: {
         if (root.centerInBar) {
             GlobalStates.islandInBarRevealed = localIslandRevealed;
+            if (localIslandRevealed) {
+                GlobalStates.topShellRevealed = true;
+            }
         }
     }
 
@@ -1277,7 +1287,7 @@ Scope {
                 && !root.eventRevealed && !root.hasUrgentActivity
                 // Bubbles hang from the island: it stays while one is being read.
                 && !root.anyBubbleHovered && root.expandedBubbleId === ""
-                && !(root.centerInBar && GlobalStates.barInBarRevealed);
+                && !(root.centerInBar && (GlobalStates.barInBarRevealed || GlobalStates.topShellRevealed));
         if (root.centerInBar)
             return false;
         // Without auto-hide only the resting face hides, so the island is not a
@@ -1397,9 +1407,21 @@ Scope {
 
     Connections {
         target: GlobalStates
+        function onTopShellRevealedChanged() {
+            if (root.centerInBar && BarInteraction.autoHide && !GlobalStates.topShellRevealed && !GlobalStates.barInBarRevealed) {
+                if (!hoverIntent.hovered && !edgeHover.hovered && !root.anyBubbleHovered && !(maskTargetTopHover?.hovered ?? false)) {
+                    root.eventRevealed = false;
+                    eventRevealTimer.stop();
+                    hoverLingerTimer.stop();
+                    edgeHideTimer.stop();
+                    root.hoverLinger = false;
+                    root.edgeRevealed = false;
+                }
+            }
+        }
         function onBarInBarRevealedChanged() {
-            if (root.centerInBar && BarInteraction.autoHide && !GlobalStates.barInBarRevealed) {
-                if (!hoverIntent.hovered && !edgeHover.hovered && !root.anyBubbleHovered) {
+            if (root.centerInBar && BarInteraction.autoHide && !GlobalStates.barInBarRevealed && !GlobalStates.topShellRevealed) {
+                if (!hoverIntent.hovered && !edgeHover.hovered && !root.anyBubbleHovered && !(maskTargetTopHover?.hovered ?? false)) {
                     root.eventRevealed = false;
                     eventRevealTimer.stop();
                     hoverLingerTimer.stop();
@@ -1707,6 +1729,9 @@ Scope {
     Component.onDestruction: {
         if (GlobalStates.islandWindow === win)
             GlobalStates.islandWindow = null;
+        if (root.centerInBar) {
+            GlobalStates.reportTopShellHover("island_" + (win.screen ? win.screen.name : ""), false);
+        }
     }
     // An activity skipped because it was open gets its turn once the island closes.
     onExpandedChanged: {

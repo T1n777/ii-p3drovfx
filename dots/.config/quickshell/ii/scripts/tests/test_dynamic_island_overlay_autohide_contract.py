@@ -26,9 +26,13 @@ class DynamicIslandOverlayAutohideContractTests(unittest.TestCase):
     def test_globalstates_holds_bar_hidden_metrics_and_reveal_flags(self):
         self.assertIn("property var barHiddenAmounts: ({})", STATES)
         self.assertIn("property var barHiddenStates: ({})", STATES)
-        self.assertIn("function setBarHiddenMetrics(screenName, hiddenAmount, isHidden)", STATES)
+        self.assertIn("property var barHiddenProgresses: ({})", STATES)
+        self.assertIn("function setBarHiddenMetrics(screenName, hiddenAmount, isHidden, progress)", STATES)
         self.assertIn("function barHiddenAmountFor(screenName)", STATES)
         self.assertIn("function isBarHidden(screenName)", STATES)
+        self.assertIn("function barHiddenProgressFor(screenName)", STATES)
+        self.assertIn("function reportTopShellHover(source, isHovered)", STATES)
+        self.assertIn("property bool topShellRevealed:", STATES)
         self.assertIn("property bool islandInBarRevealed:", STATES)
         self.assertIn("property bool barInBarRevealed:", STATES)
 
@@ -38,14 +42,16 @@ class DynamicIslandOverlayAutohideContractTests(unittest.TestCase):
 
     def test_bar_window_coordinates_reveal_and_publishes_metrics(self):
         self.assertIn("GlobalStates.setBarHiddenMetrics(autohidePublisher.screenName", BAR_WINDOW)
+        self.assertIn("GlobalStates.reportTopShellHover", BAR_WINDOW)
         self.assertIn("GlobalStates.islandInBarRevealed", BAR_WINDOW)
-        self.assertIn("GlobalStates.barInBarRevealed", BAR_WINDOW)
+        self.assertIn("GlobalStates.topShellRevealed", BAR_WINDOW)
 
     def test_notch_island_translates_with_bar_hidden_amount(self):
         self.assertIn("barHiddenAmount", NOTCH_ISLAND)
         self.assertIn("shown - root.barHiddenAmount", NOTCH_ISLAND)
         self.assertIn("GlobalStates.islandInBarRevealed", NOTCH_ISLAND)
-        self.assertIn("GlobalStates.barInBarRevealed", NOTCH_ISLAND)
+        self.assertIn("GlobalStates.topShellRevealed", NOTCH_ISLAND)
+        self.assertIn("GlobalStates.reportTopShellHover", NOTCH_ISLAND)
         self.assertIn("effectiveHideDelay", NOTCH_ISLAND)
         self.assertIn("!root.centerInBar", NOTCH_ISLAND)
         self.assertIn("root.centerInBar ? null : edgeSensor", NOTCH_ISLAND)

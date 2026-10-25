@@ -936,16 +936,21 @@ Singleton {
         root.barIslands = next;
     }
 
-    // ── Bar autohide metrics & reveal coordination ────────────────────────────
+    // ── Unified Top Shell Autohide Controller ────────────────────────────────
     property var barHiddenAmounts: ({})
     property var barHiddenStates: ({})
-    function setBarHiddenMetrics(screenName, hiddenAmount, isHidden) {
+    property var barHiddenProgresses: ({})
+
+    function setBarHiddenMetrics(screenName, hiddenAmount, isHidden, progress) {
         if (!screenName)
             return;
+        const p = (progress !== undefined) ? progress : (hiddenAmount / Math.max(1, Appearance.sizes.barHeight));
         const prevAmount = root.barHiddenAmounts[screenName] ?? -1;
         const prevState = root.barHiddenStates[screenName] ?? false;
-        if (prevAmount === hiddenAmount && prevState === isHidden)
+        const prevProgress = root.barHiddenProgresses[screenName] ?? -1;
+        if (prevAmount === hiddenAmount && prevState === isHidden && prevProgress === p)
             return;
+
         const nextAmounts = Object.assign({}, root.barHiddenAmounts);
         nextAmounts[screenName] = hiddenAmount;
         root.barHiddenAmounts = nextAmounts;
@@ -953,17 +958,98 @@ Singleton {
         const nextStates = Object.assign({}, root.barHiddenStates);
         nextStates[screenName] = isHidden;
         root.barHiddenStates = nextStates;
+
+        const nextProgresses = Object.assign({}, root.barHiddenProgresses);
+        nextProgresses[screenName] = p;
+        root.barHiddenProgresses = nextProgresses;
     }
+
     function barHiddenAmountFor(screenName) {
         return root.barHiddenAmounts[screenName] ?? 0;
     }
+
     function isBarHidden(screenName) {
         return root.barHiddenStates[screenName] === true;
     }
 
-    // Dynamic Island in bar center reveal sync
+    function barHiddenProgressFor(screenName) {
+        if (!screenName)
+            return 0.0;
+        if (root.barHiddenProgresses[screenName] !== undefined)
+            return root.barHiddenProgresses[screenName];
+        return root.isBarHidden(screenName) ? 1.0 : 0.0;
+    }
+
+    // Centralized Hover Source Tracking:
+    property var topShellHoverSources: ({})
+    readonly property bool topShellHovered: Object.keys(root.topShellHoverSources).length > 0
+
+    function isTopShellHoveredFor(screenName) {
+        if (!screenName) return root.topShellHovered;
+        for (const k in root.topShellHoverSources) {
+            if (k.endsWith(screenName) && root.topShellHoverSources[k] === true)
+                return true;
+        }
+        return false;
+    }
+
+    function reportTopShellHover(source, isHovered) {
+        if (!source)
+            return;
+        const current = root.topShellHoverSources[source] === true;
+        if (current === isHovered)
+            return;
+        const next = Object.assign({}, root.topShellHoverSources);
+        if (isHovered) {
+            next[source] = true;
+        } else {
+            delete next[source];
+        }
+        root.topShellHoverSources = next;
+    }
+
+    readonly property int topShellHideDelay: Math.max(80, Config.options?.bar?.autoHide?.hideDelay ?? 80)
+    property bool topShellRevealed: false
+
+    Timer {
+        id: topShellCloseTimer
+        interval: root.topShellHideDelay
+        repeat: false
+        onTriggered: {
+            if (!root.topShellHovered) {
+                root.topShellRevealed = false;
+                root.islandInBarRevealed = false;
+                root.barInBarRevealed = false;
+            }
+        }
+    }
+
+    onTopShellHoveredChanged: {
+        if (root.topShellHovered) {
+            topShellCloseTimer.stop();
+            root.topShellRevealed = true;
+            root.islandInBarRevealed = true;
+            root.barInBarRevealed = true;
+        } else {
+            topShellCloseTimer.restart();
+        }
+    }
+
+    // Dynamic Island in bar center reveal sync (backwards-compatible bindings)
     property bool islandInBarRevealed: false
     property bool barInBarRevealed: false
+    onIslandInBarRevealedChanged: {
+        if (root.islandInBarRevealed) {
+            topShellCloseTimer.stop();
+            root.topShellRevealed = true;
+        }
+    }
+    onBarInBarRevealedChanged: {
+        if (root.barInBarRevealed) {
+            topShellCloseTimer.stop();
+            root.topShellRevealed = true;
+        }
+    }
 
     // The live docks, newest last: the Settings dock preview reads the first one's
     // model (`modelItems`) and helpers instead of deriving the dock's contents again.

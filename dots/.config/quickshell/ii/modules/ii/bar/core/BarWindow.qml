@@ -107,15 +107,20 @@ Scope {
             readonly property string screenName: root.screen ? root.screen.name : ""
             readonly property real hiddenAmount: barRoot.hiddenAmount
             readonly property bool isHidden: barRoot.hiddenAmount >= Appearance.sizes.barHeight - 0.5 && BarInteraction.autoHide
+            readonly property real progress: barRoot.hiddenAmount / Math.max(1, Appearance.sizes.barHeight)
 
             function publish() {
-                GlobalStates.setBarHiddenMetrics(autohidePublisher.screenName, autohidePublisher.hiddenAmount, autohidePublisher.isHidden);
+                GlobalStates.setBarHiddenMetrics(autohidePublisher.screenName, autohidePublisher.hiddenAmount, autohidePublisher.isHidden, autohidePublisher.progress);
             }
 
             onHiddenAmountChanged: publish()
             onIsHiddenChanged: publish()
+            onProgressChanged: publish()
             Component.onCompleted: publish()
-            Component.onDestruction: GlobalStates.setBarHiddenMetrics(autohidePublisher.screenName, 0, false)
+            Component.onDestruction: {
+                GlobalStates.setBarHiddenMetrics(autohidePublisher.screenName, 0, false, 0);
+                GlobalStates.reportTopShellHover("bar_" + autohidePublisher.screenName, false);
+            }
         }
 
         // ── Window tracking (for showBarBackground) ──────────────────────────
@@ -198,12 +203,18 @@ Scope {
             id: hoverCloseTimer
             interval: Math.max(80, barRoot.hideDelay)
             repeat: false
-            onTriggered: barRoot.hoverTriggered = false
+            onTriggered: {
+                barRoot.hoverTriggered = false;
+                const screenKey = "bar_" + (root.screen ? root.screen.name : "");
+                GlobalStates.reportTopShellHover(screenKey, false);
+            }
         }
 
         Connections {
             target: hoverRegion
             function onContainsMouseChanged() {
+                const screenKey = "bar_" + (root.screen ? root.screen.name : "");
+                GlobalStates.reportTopShellHover(screenKey, hoverRegion.containsMouse);
                 if (hoverRegion.containsMouse) {
                     hoverCloseTimer.stop();
                     if (barRoot.hoverDelay <= 0 || barRoot.hiddenAmount < 1 || barRoot.superShow || GlobalStates.sidebarLeftOpen || GlobalStates.sidebarRightOpen) {
@@ -225,7 +236,9 @@ Scope {
                 GlobalStates.barInBarRevealed = localBarRevealed;
             }
         }
-        property bool mustShow: localBarRevealed || (BarInteraction.isIslandInBarCenter && GlobalStates.islandInBarRevealed)
+        property bool mustShow: localBarRevealed
+            || (BarInteraction.isIslandInBarCenter && (GlobalStates.islandInBarRevealed || GlobalStates.topShellRevealed))
+            || (!BarInteraction.isIslandInBarCenter && GlobalStates.topShellRevealed)
         // BarInteraction, not the stored flag: a touch-first family forces auto-hide off
         // without rewriting the preference the user has saved.
         property real hiddenAmount: (BarInteraction.autoHide && !mustShow) ? Appearance.sizes.barHeight : 0
