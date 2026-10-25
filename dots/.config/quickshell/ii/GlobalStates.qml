@@ -2712,7 +2712,7 @@ Singleton {
         }
 
         function closeMirror(): void {
-            root.phoneRequestSubPage = "";
+            root.phoneRequestSubPage = "__close__";
             root.sidebarLeftOpen = false;
         }
 

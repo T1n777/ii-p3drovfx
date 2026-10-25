@@ -351,12 +351,40 @@ def attach_device(dev_id):
     if initial is not None:
         emit({"event": "remote_keyboard", "id": dev_id, "active": bool(initial)})
 
+    def on_reachable_changed(params):
+        reachable = bool(_unpack_variant(params.get_child_value(0))) if params.n_children() > 0 else False
+        emit({"event": "device_props", "id": dev_id, "changed": {"isReachable": reachable}})
+    _subscribe(dev_path, DEVICE_IFACE, "reachableChanged", on_reachable_changed)
+
     def on_pair_state_changed(params):
         pair_state = int(_unpack_variant(params.get_child_value(0))) if params.n_children() > 0 else 0
         if pair_state == 2:
             props = fetch_device_props(dev_id)
             emit({"event": "pairing_request", "id": dev_id, "name": props.get("name", "")})
+        emit({"event": "device_props", "id": dev_id, "changed": {
+            "pairState": pair_state,
+            "isPaired": (pair_state == 3)
+        }})
     _subscribe(dev_path, DEVICE_IFACE, "pairStateChanged", on_pair_state_changed)
+
+    def on_name_changed(params):
+        name = str(_unpack_variant(params.get_child_value(0))) if params.n_children() > 0 else ""
+        emit({"event": "device_props", "id": dev_id, "changed": {"name": name}})
+    _subscribe(dev_path, DEVICE_IFACE, "nameChanged", on_name_changed)
+
+    def on_type_changed(params):
+        dev_type = str(_unpack_variant(params.get_child_value(0))) if params.n_children() > 0 else ""
+        emit({"event": "device_props", "id": dev_id, "changed": {"type": dev_type}})
+    _subscribe(dev_path, DEVICE_IFACE, "typeChanged", on_type_changed)
+
+    def on_plugins_changed(_params):
+        loaded = _get_prop(dev_path, DEVICE_IFACE, "loadedPlugins") or []
+        supported = _get_prop(dev_path, DEVICE_IFACE, "supportedPlugins") or []
+        emit({"event": "device_props", "id": dev_id, "changed": {
+            "loadedPlugins": [str(x) for x in loaded],
+            "supportedPlugins": [str(x) for x in supported]
+        }})
+    _subscribe(dev_path, DEVICE_IFACE, "pluginsChanged", on_plugins_changed)
 
 
 def detach_device(dev_id):
