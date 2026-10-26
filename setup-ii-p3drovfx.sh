@@ -187,6 +187,7 @@ PROTECTED_PATTERNS=(
     ".protected"
     "user/generated/*.json"
     "modules/common/widgets/NotificationAppIcon.qml"
+    "services/ShellUpdates.qml"
     "scripts/hyprland/workspace_arranger"
     "scripts/hyprland/workspace_profile_manager"
     "scripts/osk/osk_autoshow"

@@ -277,7 +277,12 @@ Singleton {
                 root.activeFork = (parts[2] ?? "").trim() || "p3drovfx";
                 root.activeCommit = (parts[3] ?? "").trim();
 
-                if (!root._probeAfterState) return;
+                if (!root._probeAfterState) {
+                    if (root.activeCommit !== "" && root.remoteCommit !== "" && root.activeCommit !== root.remoteCommit) {
+                        root.refresh();
+                    }
+                    return;
+                }
                 root._probeAfterState = false;
                 if (root.activeRemote === "" || root.activeCommit === "") {
                     root._finishCheck();
@@ -355,7 +360,7 @@ Singleton {
         path: `${root.stateDir}/.active-commit`
         watchChanges: true
         printErrors: false
-        onFileChanged: root.reloadState()
+        onFileChanged: root.refresh()
     }
 
     // A QML live-reload re-creates this singleton, so a plain timer would spend a
