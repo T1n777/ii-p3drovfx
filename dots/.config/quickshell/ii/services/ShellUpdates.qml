@@ -122,6 +122,8 @@ Singleton {
     // Display name for a fork preset id; a custom remote shows its repo slug.
     function forkLabel(fork) {
         switch (fork) {
+        case "dynamic-island":
+            return "ii-p3drovfx-dynamic-island";
         case "p3drovfx":
         case "mine":
             return "II-P3DROVFX";

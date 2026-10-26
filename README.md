@@ -66,8 +66,8 @@ Use this if you don't have illogical-impulse installed yet. It sets up the base
 dotfiles and everything they need, then puts my config on top.
 
 ```bash
-git clone --recurse-submodules https://github.com/P3DROVFX/ii-p3drovfx.git
-cd ii-p3drovfx
+git clone --recurse-submodules https://github.com/imyash0722/ii-p3drovfx-dynamic-island.git
+cd ii-p3drovfx-dynamic-island
 ./setup-ii-p3drovfx.sh install
 ```
 
@@ -77,8 +77,8 @@ Use this if illogical-impulse already works and you only want my Quickshell conf
 Nothing else is touched, and your current config is moved to a backup instead of deleted.
 
 ```bash
-git clone --recurse-submodules https://github.com/P3DROVFX/ii-p3drovfx.git
-cd ii-p3drovfx
+git clone --recurse-submodules https://github.com/imyash0722/ii-p3drovfx-dynamic-island.git
+cd ii-p3drovfx-dynamic-island
 ./setup-ii-p3drovfx.sh
 ```
 

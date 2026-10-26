@@ -150,27 +150,30 @@ BACKUPS_TO_KEEP=3
 
 # ── Fork presets ─────────────────────────────────────────────────────────────
 declare -A PRESET_URLS=(
+    ["dynamic-island"]="https://github.com/imyash0722/ii-p3drovfx-dynamic-island"
+    ["mine"]="https://github.com/imyash0722/ii-p3drovfx-dynamic-island"
     ["p3drovfx"]="https://github.com/P3DROVFX/ii-p3drovfx"
-    ["mine"]="https://github.com/P3DROVFX/ii-p3drovfx"
     ["end4"]="https://github.com/end-4/dots-hyprland"
     ["vynx"]="https://github.com/vaguesyntax/ii-vynx"
-    ["upstream"]="https://github.com/vaguesyntax/ii-vynx"
+    ["upstream"]="https://github.com/P3DROVFX/ii-p3drovfx"
 )
 declare -A PRESET_BRANCHES=(
-    ["p3drovfx"]="main"
-    ["mine"]="main"
+    ["dynamic-island"]="dev"
+    ["mine"]="dev"
+    ["p3drovfx"]="dev"
     ["end4"]="main"
     ["vynx"]="main"
-    ["upstream"]="main"
+    ["upstream"]="dev"
 )
 # Canonical id per URL, so aliases collapse to one name in the UI and state files.
 declare -A PRESET_CANONICAL=(
+    ["https://github.com/imyash0722/ii-p3drovfx-dynamic-island"]="dynamic-island"
     ["https://github.com/P3DROVFX/ii-p3drovfx"]="p3drovfx"
     ["https://github.com/end-4/dots-hyprland"]="end4"
     ["https://github.com/vaguesyntax/ii-vynx"]="vynx"
 )
-FALLBACK_URL="https://github.com/P3DROVFX/ii-p3drovfx"
-FALLBACK_BRANCH="main"
+FALLBACK_URL="https://github.com/imyash0722/ii-p3drovfx-dynamic-island"
+FALLBACK_BRANCH="dev"
 
 # Where `install` gets the base illogical-impulse dotfiles from. Always end-4's
 # own installer: the fork only layers its Quickshell config on top.
@@ -183,6 +186,7 @@ PROTECTED_PATTERNS=(
     "*.env"
     ".protected"
     "user/generated/*.json"
+    "modules/common/widgets/NotificationAppIcon.qml"
     "scripts/hyprland/workspace_arranger"
     "scripts/hyprland/workspace_profile_manager"
     "scripts/osk/osk_autoshow"

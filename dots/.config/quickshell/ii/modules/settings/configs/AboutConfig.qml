@@ -920,12 +920,12 @@ Item {
                     topLeftRadius: Appearance.rounding.large
                     title: Translation.tr("This fork")
                     icon: "call_split"
-                    name: "II-P3DROVFX"
-                    url: "https://github.com/P3DROVFX/ii-p3drovfx"
+                    name: ShellUpdates.forkLabel(ShellUpdates.activeFork) || "II-P3DROVFX"
+                    url: ShellUpdates.activeRemote || "https://github.com/imyash0722/ii-p3drovfx-dynamic-island"
                     links: [
-                        { "icon": "code", "label": Translation.tr("GitHub"), "url": "https://github.com/P3DROVFX/ii-p3drovfx" },
+                        { "icon": "code", "label": Translation.tr("GitHub"), "url": ShellUpdates.activeRemote || "https://github.com/imyash0722/ii-p3drovfx-dynamic-island" },
                         { "icon": "auto_stories", "label": Translation.tr("Wiki"), "url": "https://github.com/P3DROVFX/ii-p3drovfx/wiki" },
-                        { "icon": "adjust", "label": Translation.tr("Issues"), "url": "https://github.com/P3DROVFX/ii-p3drovfx/issues", "fill": false }
+                        { "icon": "adjust", "label": Translation.tr("Issues"), "url": (ShellUpdates.activeRemote || "https://github.com/imyash0722/ii-p3drovfx-dynamic-island") + "/issues", "fill": false }
                     ]
                     logo: Image {
                         anchors.fill: parent

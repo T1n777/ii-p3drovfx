@@ -1,10 +1,40 @@
 # Changelog & Architectural Enhancements: ii-p3drovfx-dynamic-island
 
-This document details all the architectural improvements, autohide engine rebuild, keyboard interactions, notification icon sanitization, and QML Settings UI integrations implemented in this fork of **ii-p3drovfx**.
+This document details all architectural improvements, autohide engine rebuilds, keyboard interactions, upstream merges, and installer adaptations implemented in this fork (**ii-p3drovfx-dynamic-island**).
 
 ---
 
-## 1. Dynamic Island Keyboard Focus & Escape Key Collapse
+## 1. Upstream Merge & Feature Ingestion (`upstream/dev` @ `0065bf2ec`)
+
+Successfully merged upstream `P3DROVFX/ii-p3drovfx@dev` with zero conflicts, bringing the following upstream additions while protecting all custom autohide and island architectural changes:
+- **Tuya Smart Devices**: Native quick toggles integration and dialog (`SmartDevicesToggle.qml`, `SmartDevicesDialog.qml`, `smart_devices.py`) supporting local and cloud Tuya device controls.
+- **Dock Running Indicators**: Restored and refined configurable running indicators on the dock (`dot` vs `pill` indicator styles, per-window markers, neutral vs accent colors).
+- **Dock Monitor Isolation**: `isolateMonitors` option to filter dock apps per-monitor.
+- **MangoHud Auto-Wiring**: Automatic Steam game detection and MangoHud hook configuration.
+- **Notes Overlay Redesign**: Redesigned notes overlay and sketch canvas integration.
+- **ii-Icon Pack Themed Icons**: Custom icon shapes and pack support in themed icon settings.
+
+---
+
+## 2. Fork Installer & In-Shell Update Adaptation
+
+Adapted `setup-ii-p3drovfx.sh`, `ShellUpdates.qml`, `AboutConfig.qml`, and `README.md` to ensure that installing or updating directly from this repository works seamlessly out of the box:
+- **Preset & Fallback Configuration**:
+  - Added preset `dynamic-island` pointing to `https://github.com/imyash0722/ii-p3drovfx-dynamic-island` branch `dev`.
+  - Configured alias `mine` to point to `https://github.com/imyash0722/ii-p3drovfx-dynamic-island`.
+  - Set `FALLBACK_URL="https://github.com/imyash0722/ii-p3drovfx-dynamic-island"` and `FALLBACK_BRANCH="dev"`.
+  - Updated `upstream` and `p3drovfx` preset branches to `dev`.
+- **Protected Files Extension**:
+  - Registered `modules/common/widgets/NotificationAppIcon.qml` in `PROTECTED_PATTERNS` so upstream or external updates never overwrite the glyph sanitization fix.
+- **Dynamic Fork Labeling in UI**:
+  - Updated `ShellUpdates.qml` to display `ii-p3drovfx-dynamic-island` for the active fork.
+  - Dynamically bound "This fork" and GitHub links in `AboutConfig.qml` and `WelcomeProjectLinks.qml` to the active remote repository.
+- **Clone Instructions**:
+  - Updated main `README.md` and `.github/README.md` install instructions to clone `https://github.com/imyash0722/ii-p3drovfx-dynamic-island.git`.
+
+---
+
+## 3. Dynamic Island Keyboard Focus & Escape Key Collapse
 
 ### Overview
 Previously, when the Dynamic Island expanded (via hover, click, or when opening the dashboard, search, wallpaper browser, or auxiliary bubbles), dismissing it required either clicking away or moving the mouse pointer completely off the surface. If media was actively playing or pending notifications existed, collapsing often retained those widget faces.
@@ -41,7 +71,7 @@ Previously, when the Dynamic Island expanded (via hover, click, or when opening 
 
 ---
 
-## 2. Rebuilt Top Shell Autohide Engine
+## 4. Rebuilt Top Shell Autohide Engine
 
 ### Root Causes Addressed
 1. **Competing Hover Timers**: The Bar and Dynamic Island operated independent hover and hide countdowns (e.g. 80ms vs 250ms), causing destructive feedback loops and rapid jittering ("shaking/flashing") when hovering near adjacent icons or the island edge.
@@ -62,7 +92,7 @@ Previously, when the Dynamic Island expanded (via hover, click, or when opening 
 
 ---
 
-## 3. QML Settings UI Fusion
+## 5. QML Settings UI Fusion
 
 The autohide options, window push behavior, and Dynamic Island configurations are fused directly into the Quickshell Settings interface:
 
@@ -83,7 +113,7 @@ The autohide options, window push behavior, and Dynamic Island configurations ar
 
 ---
 
-## 4. Notification App Icon Path Sanitization
+## 6. Notification App Icon Path Sanitization
 
 ### Issue
 When applications sent raw filesystem paths (e.g. `.SCOPED_DIR.YYT79A/ICON.PNG` or Chromium temp icon paths) as notification app icons, the shell attempted to render them as Material Symbols. This caused huge raw path strings to sprawl across notification toasts and the notification center.
@@ -104,7 +134,7 @@ When applications sent raw filesystem paths (e.g. `.SCOPED_DIR.YYT79A/ICON.PNG` 
 
 ---
 
-## 5. Verification & Contract Test Suites
+## 7. Verification & Contract Test Suites
 
 Dedicated Python contract tests have been introduced under `scripts/tests/`:
 1. `test_dynamic_island_escape_and_settings_contract.py`:

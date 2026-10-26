@@ -20,6 +20,9 @@ DYNAMIC_STYLE = (ROOT / "modules/ii/bar/styles/DynamicIslandStyle.qml").read_tex
 BAR_BEHAVIOR = (ROOT / "modules/settings/configs/sections/BarBehaviorSection.qml").read_text(encoding="utf-8")
 BAR_PLACEMENT = (ROOT / "modules/settings/configs/sections/BarPlacementSection.qml").read_text(encoding="utf-8")
 BAR_CONFIG = (ROOT / "modules/settings/configs/BarConfig.qml").read_text(encoding="utf-8")
+SHELL_UPDATES = (ROOT / "services/ShellUpdates.qml").read_text(encoding="utf-8")
+SETUP_SCRIPT_PATH = ROOT.parents[3] / "setup-ii-p3drovfx.sh"
+SETUP_SCRIPT = SETUP_SCRIPT_PATH.read_text(encoding="utf-8") if SETUP_SCRIPT_PATH.exists() else ""
 
 
 class DynamicIslandEscapeAndSettingsContractTests(unittest.TestCase):
@@ -60,6 +63,13 @@ class DynamicIslandEscapeAndSettingsContractTests(unittest.TestCase):
         self.assertIn("barConfigRoot.bar.autoHide.pushWindows", BAR_CONFIG)
         self.assertIn("barConfigRoot.bar.autoHide.hideDelay", BAR_CONFIG)
         self.assertIn("Config.options.bar.floatingNotch.autoHide = checked;", BAR_CONFIG)
+
+    def test_installer_and_updates_configuration(self):
+        self.assertIn('["dynamic-island"]="https://github.com/imyash0722/ii-p3drovfx-dynamic-island"', SETUP_SCRIPT)
+        self.assertIn('FALLBACK_URL="https://github.com/imyash0722/ii-p3drovfx-dynamic-island"', SETUP_SCRIPT)
+        self.assertIn('FALLBACK_BRANCH="dev"', SETUP_SCRIPT)
+        self.assertIn('case "dynamic-island":', SHELL_UPDATES)
+        self.assertIn('"ii-p3drovfx-dynamic-island"', SHELL_UPDATES)
 
 
 if __name__ == "__main__":
