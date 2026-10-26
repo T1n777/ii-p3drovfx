@@ -65,6 +65,11 @@ class DynamicIslandOverlayAutohideContractTests(unittest.TestCase):
     def test_depth_cutout_layer_checks_bar_hidden(self):
         self.assertIn("!GlobalStates.isBarHidden(root.screenName)", DEPTH_CUTOUT)
 
+    def test_topshell_keyboard_and_event_reveal_release_triggers_close(self):
+        self.assertIn("else if (!root.topShellHovered && !root.barInBarRevealed)", STATES)
+        self.assertIn("else if (!root.topShellHovered && !root.islandInBarRevealed)", STATES)
+        self.assertIn("!root.topShellHovered && !root.islandInBarRevealed && !root.barInBarRevealed", STATES)
+
 
 if __name__ == "__main__":
     unittest.main()

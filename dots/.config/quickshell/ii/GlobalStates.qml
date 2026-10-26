@@ -1016,7 +1016,7 @@ Singleton {
         interval: root.topShellHideDelay
         repeat: false
         onTriggered: {
-            if (!root.topShellHovered) {
+            if (!root.topShellHovered && !root.islandInBarRevealed && !root.barInBarRevealed) {
                 root.topShellRevealed = false;
                 root.islandInBarRevealed = false;
                 root.barInBarRevealed = false;
@@ -1028,8 +1028,6 @@ Singleton {
         if (root.topShellHovered) {
             topShellCloseTimer.stop();
             root.topShellRevealed = true;
-            root.islandInBarRevealed = true;
-            root.barInBarRevealed = true;
         } else {
             topShellCloseTimer.restart();
         }
@@ -1042,12 +1040,16 @@ Singleton {
         if (root.islandInBarRevealed) {
             topShellCloseTimer.stop();
             root.topShellRevealed = true;
+        } else if (!root.topShellHovered && !root.barInBarRevealed) {
+            topShellCloseTimer.restart();
         }
     }
     onBarInBarRevealedChanged: {
         if (root.barInBarRevealed) {
             topShellCloseTimer.stop();
             root.topShellRevealed = true;
+        } else if (!root.topShellHovered && !root.islandInBarRevealed) {
+            topShellCloseTimer.restart();
         }
     }
 

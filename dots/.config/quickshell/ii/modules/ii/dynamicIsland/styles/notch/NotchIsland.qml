@@ -1348,7 +1348,7 @@ Scope {
      * `eventRevealMs`, and then retracts. Interrupts (a notification, the volume OSD)
      * hold it for as long as they last; they are short-lived by definition.
      */
-    readonly property int eventRevealMs: 4000
+    readonly property int eventRevealMs: 2500
     readonly property bool hasUrgentActivity: controller.activities.some(activity => activity.tier === "interrupt")
     property bool eventRevealed: false
     property string eventId: ""
@@ -1386,6 +1386,9 @@ Scope {
         if (latest === "" || IslandPolicy.quietWindowActive)
             return;
         root.eventId = latest;
+        const src = controller.sources ? controller.sources.sourceFor(latest) : null;
+        const duration = (src && src.ttlMs && src.ttlMs > 0) ? src.ttlMs : root.eventRevealMs;
+        eventRevealTimer.interval = duration;
         root.eventRevealed = true;
         eventRevealTimer.restart();
     }
