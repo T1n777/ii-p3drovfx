@@ -371,7 +371,7 @@ Item {
                     from: 0
                     to: 1000
                     stepSize: 25
-                    value: barConfigRoot.bar.autoHide.hideDelay ?? 80
+                    value: barConfigRoot.bar.autoHide.hideDelay ?? 200
                     onValueChanged: Config.options.bar.autoHide.hideDelay = value
                     StyledToolTip {
                         text: Translation.tr("Delay in milliseconds before the bar hides after the pointer leaves")

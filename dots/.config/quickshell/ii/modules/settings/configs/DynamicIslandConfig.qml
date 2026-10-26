@@ -809,7 +809,7 @@ Item {
                         value: Config.options.bar.floatingNotch.hoverExpandDelayMs
                         from: 0
                         to: 5000
-                        stepSize: 100
+                        stepSize: 50
                         onValueChanged: {
                             Config.options.bar.floatingNotch.hoverExpandDelayMs = value;
                         }

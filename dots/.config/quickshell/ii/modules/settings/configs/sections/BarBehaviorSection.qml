@@ -115,7 +115,7 @@ ContentSection {
         visible: Config.options.bar.autoHide.enable
         icon: "timer"
         text: Translation.tr("Hide delay (ms)")
-        value: Config.options.bar.autoHide.hideDelay ?? 80
+        value: Config.options.bar.autoHide.hideDelay ?? 200
         from: 0
         to: 1000
         stepSize: 25

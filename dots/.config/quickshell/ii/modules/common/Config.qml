@@ -4736,11 +4736,10 @@ Singleton {
                     property bool hideOnFullscreen: true
                     // Hover is an intent, not a hit: see IslandHoverIntent.
                     property int sideExpandDwellMs: 160
-                    property int dashboardDwellMs: 320
+                    property int dashboardDwellMs: 260
                     // One grace for the island and for its bubbles; see
-                    // IslandPolicy.collapseGraceMs. 450 is what the bubbles already
-                    // used, and the island now matches them instead of lingering.
-                    property int collapseGraceMs: 450
+                    // IslandPolicy.collapseGraceMs.
+                    property int collapseGraceMs: 280
                     // How long state-derived triggers stay muted after a boot, a reload
                     // or an unlock, when the system restores state in bulk.
                     property int quietWindowMs: 1200
@@ -4748,7 +4747,7 @@ Singleton {
                     // rested on the island for this long, and the island swells while
                     // it waits so the hold is visible. Off: a hover opens it.
                     property bool holdToReveal: false
-                    property int holdToRevealMs: 700
+                    property int holdToRevealMs: 600
                     // Keep the dashboard's quick-toggle grid resident. Off: the grid
                     // is built on open and released after the closing fade. On: built
                     // once and kept, so openings are instant at the price of the
@@ -5093,9 +5092,9 @@ Singleton {
                 property JsonObject autoHide: JsonObject {
                     property bool enable: false
                     property string mode: "instant" // "instant" | "dwell" | "wide" | "cautious"
-                    property int hoverRegionWidth: 2
+                    property int hoverRegionWidth: 6
                     property int hoverDelay: 0
-                    property int hideDelay: 80
+                    property int hideDelay: 200
                     property bool pushWindows: false
                     property JsonObject showWhenPressingSuper: JsonObject {
                         property bool enable: true
@@ -5126,7 +5125,7 @@ Singleton {
                     property bool autoHide: false
                     // How long the pointer has to rest on the island before it opens
                     // its expanded face. Hovering reveals the contracted face at once.
-                    property int hoverExpandDelayMs: 600
+                    property int hoverExpandDelayMs: 350
                     // The island's outer shell. "notch" hangs from the top edge with
                     // concave shoulders; "sculpted" is the same notch with each side one
                     // long S flaring into the edge; "island" is a free-floating pill
