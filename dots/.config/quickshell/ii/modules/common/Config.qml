@@ -3157,6 +3157,13 @@ Singleton {
                     property bool enableThemed: false
                     property bool enableShapeMask: false
                     property string shapeMask: "Circle"
+                    // ii-icon-pack, installed and reshaped from Settings -> Themed icons (services/IiIconPack.qml)
+                    property JsonObject iiPack: JsonObject {
+                        property string shape: "circle" // A key from the pack's `iipack.py shapes`
+                        property real plateScale: 1.0 // Icon size inside its canvas, 0.6-1.08
+                        property real glyphScale: 1.0 // Logo size on the plate, 0.5-1.5
+                        property string source: "" // Pack checkout; empty = ~/.local/share/ii-icon-pack
+                    }
                 }
                 property string borderColorType: "primary" // Options: primary, secondary, tertiary, primaryContainer, surface
                 property bool borderless: true
@@ -5850,6 +5857,17 @@ Singleton {
                 property bool autoOverflowGroup: true
                 property bool enableShapeMask: true
                 property string shapeMask: "Circle"
+                // Running mark beside each dock icon: "dot" is a circle, "pill" a
+                // bar along the icon's edge. One per window, and anything past
+                // runningIndicatorMaxVisible collapses to circles. Sizes are px
+                // on a 56 px dock, scaled by dock.height unless ScaleWithDock is off.
+                property string runningIndicatorStyle: "dot"
+                property int runningIndicatorLength: 10
+                property int runningIndicatorThickness: 3
+                property int runningIndicatorMaxVisible: 5
+                property bool runningIndicatorScaleWithDock: true
+                // The focused window's mark in colOnLayer0 instead of colPrimary.
+                property bool runningIndicatorNeutralColor: false
                 property real height: 56
                 property real hoverRegionHeight: 2
                 property bool pinnedOnStartup: false
@@ -6709,10 +6727,6 @@ Singleton {
                     property string imageSource: "https://media.tenor.com/H5U5bJzj3oAAAAAi/kukuru.gif" //media.tenor.com/H5U5bJzj3oAAAAAi/kukuru.gif"
                     property real scale: 0.5
                 }
-                property JsonObject notes: JsonObject {
-                    property bool showTabs: true
-                    property bool allowEditingIcon: true
-                }
                 property JsonObject media: JsonObject {
                     property int backgroundOpacityPercentage: 100
                     property bool useGradientMask: true
@@ -6733,6 +6747,9 @@ Singleton {
                 }
                 // Performance HUD (RivaTuner style). Frame rate comes from MangoHud's logger.
                 property JsonObject perfMonitor: JsonObject {
+                    // Steam got its MangoHud wiring once, on first run; after that the
+                    // per-game switch in Settings decides.
+                    property bool gamesAutoWired: false
                     // Pin the HUD on screen while a game is detected
                     property bool autoPin: false
                     property string style: "bars" // bars | graph | text
