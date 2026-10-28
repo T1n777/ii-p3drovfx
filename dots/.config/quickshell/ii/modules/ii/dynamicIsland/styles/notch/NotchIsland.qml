@@ -407,15 +407,14 @@ Scope {
         root.forceCollapse();
         root.dismissDashboard();
         root.expandedBubbleId = "";
-        if (controller.sources.session && typeof controller.sources.session.close === "function")
-            controller.sources.session.close();
-        if (controller.sources.wallpaper && typeof controller.sources.wallpaper.close === "function")
-            controller.sources.wallpaper.close();
-        if (controller.sources.search && typeof controller.sources.search.close === "function")
-            controller.sources.search.close();
-        if (root.centerInBar && BarInteraction.autoHide) {
-            root.edgeRevealed = root.islandShellHovered;
-        }
+        if (GlobalStates.sessionOpen)
+            GlobalStates.sessionOpen = false;
+        if (GlobalStates.wallpaperSelectorOpen)
+            GlobalStates.wallpaperSelectorOpen = false;
+        if (GlobalStates.overviewOpen)
+            GlobalStates.closeOverview();
+        if (root.centerInBar)
+            root.edgeRevealed = false;
     }
 
     /**
@@ -495,13 +494,33 @@ Scope {
         target: GlobalStates
         function onOverviewOpenChanged() {
             root.forceCollapse();
-            if (!GlobalStates.overviewOpen && !root.explicitSurfaceActive && !hoverIntent.hovered)
+            if (GlobalStates.overviewOpen) {
+                root.preferClockFace = false;
                 root.expandSuppressed = false;
+            } else if (!root.explicitSurfaceActive && !hoverIntent.hovered) {
+                root.expandSuppressed = false;
+            }
         }
         function onAppDrawerOpenChanged() {
             root.forceCollapse();
-            if (!GlobalStates.appDrawerOpen && !root.explicitSurfaceActive && !hoverIntent.hovered)
+            if (GlobalStates.appDrawerOpen) {
+                root.preferClockFace = false;
                 root.expandSuppressed = false;
+            } else if (!root.explicitSurfaceActive && !hoverIntent.hovered) {
+                root.expandSuppressed = false;
+            }
+        }
+        function onSessionOpenChanged() {
+            if (GlobalStates.sessionOpen) {
+                root.preferClockFace = false;
+                root.expandSuppressed = false;
+            }
+        }
+        function onWallpaperSelectorOpenChanged() {
+            if (GlobalStates.wallpaperSelectorOpen) {
+                root.preferClockFace = false;
+                root.expandSuppressed = false;
+            }
         }
         function onScreenLockedChanged() {
             root.forceCollapse();
@@ -1267,6 +1286,8 @@ Scope {
     property bool edgeRevealed: false
     readonly property bool islandShellHovered: hoverIntent.hovered || root.anyBubbleHovered || (maskTargetTopHover?.hovered ?? false)
     onIslandShellHoveredChanged: {
+        if (!islandShellHovered)
+            root.preferClockFace = false;
         if (root.centerInBar) {
             GlobalStates.reportTopShellHover("island_" + (win.screen ? win.screen.name : ""), islandShellHovered);
         }
@@ -2096,13 +2117,21 @@ Scope {
         Item {
             id: fullWindow
             anchors.fill: parent
+            focus: true
+
+            Keys.onReleased: event => {
+                if (event.key === Qt.Key_Super_L || event.key === Qt.Key_Super_R || event.key === Qt.Key_Meta) {
+                    GlobalStates.toggleOverview();
+                    event.accepted = true;
+                }
+            }
 
             // With a grid hanging outside the body the whole window takes input, so a
             // click beside the launcher lands here instead of clearing the grab below.
             // Anything over the island or the grid is theirs and never reaches this.
             MouseArea {
                 anchors.fill: parent
-                enabled: root.searchActive
+                enabled: root.searchActive || GlobalStates.overviewOpen
                 acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
                 onPressed: mouse => {
                     const inside = mouse.x >= container.x && mouse.x <= container.x + container.width
@@ -2293,6 +2322,13 @@ Scope {
 
         Item {
             id: container
+
+            Keys.onReleased: event => {
+                if (event.key === Qt.Key_Super_L || event.key === Qt.Key_Super_R || event.key === Qt.Key_Meta) {
+                    GlobalStates.toggleOverview();
+                    event.accepted = true;
+                }
+            }
 
             ShellRegionTarget {
                 target: container

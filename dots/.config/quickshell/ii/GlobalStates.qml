@@ -1056,6 +1056,7 @@ Singleton {
     // Dynamic Island Escape / collapse coordination
     signal collapseIslandRequested()
     function collapseDynamicIsland(): void {
+        root.superDown = false;
         collapseIslandRequested();
     }
 
@@ -1369,6 +1370,15 @@ Singleton {
         function onConnectModeActiveChanged() {
             if (root.connectModeActive)
                 root.editMode = false;
+        }
+    }
+
+    Connections {
+        target: Hyprland
+        function onRawEvent(event) {
+            if (event.name === "workspace" || event.name === "workspacev2" || event.name === "focusedmon") {
+                root.superDown = false;
+            }
         }
     }
 
