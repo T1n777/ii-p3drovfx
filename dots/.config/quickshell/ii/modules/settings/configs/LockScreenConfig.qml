@@ -206,8 +206,7 @@ Item {
 
                 readonly property int gap: 12
                 readonly property int fits: Math.max(1, Math.floor((width + gap) / (300 + gap)))
-                // Four tiles: one row of four, two of two or a column, never 3 + 1.
-                readonly property int columns: fits >= 4 ? 4 : fits >= 2 ? 2 : 1
+                readonly property int columns: fits >= 5 ? 5 : fits >= 3 ? 3 : fits >= 2 ? 2 : 1
                 readonly property int tileWidth: Math.floor((width - gap * (columns - 1)) / columns)
                 readonly property int tileHeight: 200
 
@@ -215,6 +214,34 @@ Item {
                     id: tileFlow
                     width: parent.width
                     spacing: tiles.gap
+
+                    ColorsFeatureTile {
+                        width: tiles.tileWidth
+                        height: tiles.tileHeight
+                        symbol: "face"
+                        shapeOn: MaterialShape.Shape.Cookie12Sided
+                        title: Translation.tr("Face ID")
+                        summary: {
+                            if (!checked)
+                                return Translation.tr("Unlock with your password only");
+                            if (FaceId.probed && !FaceId.gazeInstalled)
+                                return Translation.tr("Gaze not installed · Tap to set up");
+                            if (FaceId.probed && !FaceId.daemonRunning)
+                                return Translation.tr("Gaze daemon not running");
+                            if (FaceId.probed && !FaceId.cameraAvailable)
+                                return Translation.tr("No camera found");
+                            if (!FaceId.hasEnrolled)
+                                return Translation.tr("No face enrolled yet");
+                            const count = FaceId.enrolledCount;
+                            if (count === 0)
+                                return Translation.tr("No face enrolled yet");
+                            return count === 1 ? Translation.tr("1 face profile enrolled") : Translation.tr("%1 face profiles enrolled").arg(count);
+                        }
+                        checked: lockScreenRoot.lock.security.faceId.enable
+                        configurable: true
+                        onToggled: value => lockScreenRoot.lock.security.faceId.enable = value
+                        onConfigureRequested: lockScreenRoot.activeSubPage = Qt.resolvedUrl("widgets/FaceIdConfig.qml")
+                    }
 
                     ColorsFeatureTile {
                         width: tiles.tileWidth

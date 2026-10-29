@@ -216,7 +216,7 @@ Item {
         anchors.top: parent.top
         // Reaches the bottom when the host gives this a height, so the list
         // scrolls inside the view instead of running past its edge.
-        anchors.bottom: root.height > listColumnLayout.implicitHeight ? parent.bottom : undefined
+        anchors.bottom: root.height > listColumnLayout.implicitHeight ? undefined : parent.bottom
         visible: root.view === "list"
         spacing: 2
 

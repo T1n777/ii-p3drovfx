@@ -88,6 +88,10 @@ Item {
         const wanted = String(GlobalStates.phoneRequestSubPage || "")
         if (wanted.length === 0) return
         GlobalStates.phoneRequestSubPage = ""
+        if (wanted === "__close__") {
+            root.closeSubPage()
+            return
+        }
         root.openSubPage(wanted)
     }
 

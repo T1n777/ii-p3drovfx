@@ -541,6 +541,7 @@ Singleton {
             break
         case "device_props":
             root._applyDeviceProps(ev.id, ev.changed ?? {})
+            root._sanitiseActiveDevice()
             break
         case "device_visibility":
             root._patchDevice(ev.id, {"reachable": ev.reachable})
@@ -704,10 +705,10 @@ Singleton {
         if ("isReachable" in changed) patch.reachable = !!changed.isReachable
         if ("isPaired" in changed) patch.paired = !!changed.isPaired
         if ("pairState" in changed) {
-            // pairState: 0 = unpaired, 1 = paired, 2 = requested
+            // KDE Connect Device::PairState enum: 0 = unpaired, 1 = requested, 2 = requestedByPeer, 3 = paired
             const ps = changed.pairState
             if (patch.paired === undefined) {
-                patch.paired = (ps === 1)
+                patch.paired = (ps === 3)
             }
         }
         if ("loadedPlugins" in changed) patch.loadedPlugins = changed.loadedPlugins.slice(0)

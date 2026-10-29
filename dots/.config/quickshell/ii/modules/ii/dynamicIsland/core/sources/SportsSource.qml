@@ -28,6 +28,8 @@ ContinuousSource {
 
     /** The first followed game in play, or null. */
     readonly property var liveGame: {
+        if (!source.wanted)
+            return null;
         const games = SportsService.allGames ?? [];
         for (let i = 0; i < games.length; i++) {
             if (games[i] && games[i].state === "in")
@@ -36,7 +38,7 @@ ContinuousSource {
         return null;
     }
 
-    condition: source.liveGame !== null
+    condition: source.wanted && source.liveGame !== null
     payload: source.liveGame
 
     // ── The score change ───────────────────────────────────────────────────
