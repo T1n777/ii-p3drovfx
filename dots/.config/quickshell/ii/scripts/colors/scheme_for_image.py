@@ -27,10 +27,10 @@ def image_colorfulness(image):
     colorfulness = np.sqrt(std_rg ** 2 + std_yb ** 2) + (0.3 * np.sqrt(mean_rg ** 2 + mean_yb ** 2))
     return colorfulness
 
-# scheme-content respects the image's colors very well, but it might
-# look too saturated, so we only use it for not very colorful images to be safe
+# Hasler and Süsstrunk metric: < 15 is not colorful (grayscale / monochrome).
+# Only truly monochrome wallpapers should fall back to scheme-neutral.
 def pick_scheme(colorfulness):
-    if colorfulness < 40:
+    if colorfulness < 15:
         return "scheme-neutral"
     else:
         return "scheme-tonal-spot"
