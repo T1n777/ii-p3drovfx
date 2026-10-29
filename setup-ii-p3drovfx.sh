@@ -2623,6 +2623,24 @@ install_hypr_config() {
     return 0
 }
 
+# Overlays the fork's dots/.config/matugen onto ~/.config/matugen.
+install_matugen_config() {
+    local repo_root="${1:-}"
+    local src="$repo_root/dots/.config/matugen"
+    local dest="$XDG_CONFIG_HOME/matugen"
+    if [[ -n "$repo_root" && -d "$src" ]]; then
+        mkdir -p "$dest"
+        cp -ru "$src"/* "$dest"/ 2>/dev/null || cp -r "$src"/* "$dest"/ 2>/dev/null || true
+    fi
+
+    local kv_src="$repo_root/dots/.config/Kvantum"
+    local kv_dest="$XDG_CONFIG_HOME/Kvantum"
+    if [[ -n "$repo_root" && -d "$kv_src" ]]; then
+        mkdir -p "$kv_dest"
+        cp -ru "$kv_src"/* "$kv_dest"/ 2>/dev/null || cp -r "$kv_src"/* "$kv_dest"/ 2>/dev/null || true
+    fi
+}
+
 # apply_config <url> <branch> <fork_id> <verb>
 #
 # Prints the banner itself unless the caller already did (install does, before
@@ -2793,6 +2811,7 @@ apply_config() {
     # After the swap: a swap that failed leaves ~/.config/hypr untouched too,
     # so a half-applied pair of configs is not a state you can end up in.
     install_hypr_config "$repo_root"
+    install_matugen_config "$repo_root"
 
     if [[ -n "$CLONE_DIR" ]]; then
         rm -rf "$CLONE_DIR"

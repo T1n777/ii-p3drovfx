@@ -45,7 +45,7 @@ VSIX="$BUILD/ii-material-you-$VERSION.vsix"
 (cd "$BUILD" && zip -qr "$VSIX" "[Content_Types].xml" extension.vsixmanifest extension)
 
 installed=0
-for cli in ${II_VSCODE_CLIS:-code codium code-insiders code-oss cursor windsurf antigravity}; do
+for cli in ${II_VSCODE_CLIS:-code codium code-insiders code-oss cursor windsurf}; do
     command -v "$cli" > /dev/null || continue
     "$cli" --install-extension "$VSIX" --force "$@" && installed=1
 done

@@ -30,6 +30,7 @@ matugen_resolve() {
     while IFS= read -r candidate; do
         [[ -x "$candidate" ]] || continue
         real=$(readlink -f -- "$candidate") || real="$candidate"
+        [[ "$real" == "$(readlink -f "${BASH_SOURCE[0]}")" ]] && continue
         [[ -v seen["$real"] ]] && continue
         seen["$real"]=1
 
@@ -53,6 +54,17 @@ matugen_resolve() {
 
 _matugen_filter_args() {
     _matugen_args=()
+    local has_source_index=0
+    local is_image_cmd=0
+    local arg
+    for arg in "$@"; do
+        if [[ "$arg" == "image" ]]; then
+            is_image_cmd=1
+        elif [[ "$arg" == "--source-color-index" || "$arg" == --source-color-index=* ]]; then
+            has_source_index=1
+        fi
+    done
+
     while (($#)); do
         if [[ "$MATUGEN_HAS_SOURCE_INDEX" != 1 ]]; then
             case "$1" in
@@ -63,6 +75,12 @@ _matugen_filter_args() {
         _matugen_args+=("$1")
         shift
     done
+
+    # In Matugen 4.x, running `image` without --source-color-index prompts interactively,
+    # hanging non-interactive scripts and background processes. Ensure a default index.
+    if [[ "$MATUGEN_HAS_SOURCE_INDEX" == 1 && "$is_image_cmd" == 1 && "$has_source_index" == 0 ]]; then
+        _matugen_args=(--source-color-index 0 "${_matugen_args[@]}")
+    fi
 }
 
 matugen() {
