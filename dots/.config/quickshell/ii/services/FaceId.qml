@@ -21,10 +21,12 @@ Singleton {
     property bool gazeInstalled: false
     property bool daemonRunning: false
     property bool cameraAvailable: false
+    property bool hasCameraHardware: false
     property bool hasEnrolled: false
     property var enrolled: []
     readonly property int enrolledCount: enrolled.length
     readonly property bool available: daemonRunning && cameraAvailable && hasEnrolled
+    readonly property bool supported: gazeInstalled && daemonRunning && cameraAvailable
 
     // ── Authentication state ────────────────────────────────────────────────
     property bool verifying: false
@@ -37,12 +39,22 @@ Singleton {
 
     // ── Probing ─────────────────────────────────────────────────────────────
     function refresh(): void {
-        checkGazeProc.running = true;
+        probeCameraHardwareProc.running = true;
     }
 
     Component.onCompleted: root.refresh()
 
-    // Step 0: Check if gaze binary is installed
+    // Step 0: Check camera hardware
+    Process {
+        id: probeCameraHardwareProc
+        command: ["bash", "-c", "test -e /dev/video0 || ls /dev/video* 2>/dev/null | grep -q video"]
+        onExited: exitCode => {
+            root.hasCameraHardware = (exitCode === 0);
+            checkGazeProc.running = true;
+        }
+    }
+
+    // Step 1: Check if gaze binary is installed
     Process {
         id: checkGazeProc
         command: ["which", "gaze"]

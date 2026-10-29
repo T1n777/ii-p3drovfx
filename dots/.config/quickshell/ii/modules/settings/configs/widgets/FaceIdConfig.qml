@@ -256,8 +256,10 @@ Item {
                 buttonIcon: "face"
                 text: Translation.tr("Unlock with Face ID")
                 checked: subPageRoot.faceIdOptions.enable
+                enabled: FaceId.probed && FaceId.supported
                 onCheckedChanged: {
-                    subPageRoot.faceIdOptions.enable = checked;
+                    if (FaceId.supported)
+                        subPageRoot.faceIdOptions.enable = checked;
                 }
                 StyledToolTip {
                     text: Translation.tr("Enable Face ID authentication on the lock screen.")
